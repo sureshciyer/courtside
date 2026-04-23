@@ -1,0 +1,18 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+html, body, #root { height: 100%; }
+body {
+  margin: 0;
+  font-family: "Outfit", system-ui, sans-serif;
+  background: #fafafa;
+  color: #212121;
+  -webkit-font-smoothing: antialiased;
+}
+
+@keyframes cs-fade-in {
+  from { opacity: 0; transform: translateX(-50%) translateY(-8px); }
+  to   { opacity: 1; transform: translateX(-50%) translateY(0); }
+}
+.cs-toast { animation: cs-fade-in 0.2s ease; }
