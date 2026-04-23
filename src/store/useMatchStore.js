@@ -5,27 +5,31 @@ import {
   initRally,
   autoRole,
   computePhase,
-  nextMatchId,
 } from "../lib/rally.js";
 
 const STORE_KEY = "courtside-v1";
-const SCHEMA_VERSION = 1;
+const SCHEMA_VERSION = 2;
 
 /**
  * Shot shape (every entry in a rally's `shots` array):
  * {
- *   code:       "F-SM-ST" | "LS"       // display code (grip-shot-dir or serve code)
- *   grip:       "F" | "B" | null       // null for serves
- *   shotType:   "SM" | "LS" | ...      // canonical shot type (3-letter)
+ *   code:       "F-SM-ST" | "LS"
+ *   grip:       "F" | "B" | null
+ *   shotType:   "SM" | "LS" | ...
  *   dir:        "ST" | "CR" | "BD" | null
- *   zone:       1..9                   // landing zone
+ *   zone:       1..9
  *   role:       "opening" | "neutral" | "disruption" | "finish"
- *   quality:    "Effective" | "Neutral" | "Ineffective" | null  // optional, for pro analysis
- *   timestamp:  number                  // seconds elapsed from rally start
+ *   quality:    "Effective" | "Neutral" | "Ineffective" | null
+ *   timestamp:  number (seconds from rally start)
  * }
+ *
+ * Match lifecycle:
+ *   currentMatch + currentRally are the "live" match being captured right now.
+ *   pausedMatches[] parks any in-progress match the user wants to come back to
+ *   later. Each paused match carries its half-captured rally as `_pausedRally`.
+ *   matches[] is the completed-match archive (End match moves here).
  */
 
-// Normalize a partially-built shot + position into the persisted shape.
 const buildShot = ({ grip, shotType, dir, zone, role, quality }, position, startedAt) => ({
   grip: grip ?? null,
   shotType,
@@ -39,36 +43,99 @@ const buildShot = ({ grip, shotType, dir, zone, role, quality }, position, start
 
 const scoreString = (set) => `${set.sonScore}-${set.oppScore}`;
 
+// Monotonic match-id generator. Uses `matchCounter` so new IDs never collide
+// with a previously-completed match that's already been archived.
+const makeMatchId = (counter) => `M${String(counter).padStart(3, "0")}`;
+
+// Package a live match for the paused shelf: bundle the separate currentRally
+// back into the match object so it can travel as a single unit.
+const packMatch = (match, rally) =>
+  match ? { ...match, _pausedRally: rally || null, pausedAt: Date.now() } : null;
+
+const unpackMatch = (paused) => {
+  if (!paused) return { match: null, rally: null };
+  const { _pausedRally, pausedAt, ...match } = paused;
+  return { match, rally: _pausedRally || null };
+};
+
 export const useMatchStore = create(
   persist(
     (set, get) => ({
       schemaVersion: SCHEMA_VERSION,
-      matches: [],        // completed matches
-      currentMatch: null, // { ...match, rallies: [finished] }
-      currentRally: null, // rally being captured right now
+      matches: [],           // completed matches (archive)
+      currentMatch: null,    // the live match being captured (or null)
+      currentRally: null,    // the rally being built inside currentMatch
+      pausedMatches: [],     // in-progress matches stashed for later
+      matchCounter: 0,       // monotonic — last id issued
 
-      // Persisted user preferences. Keeping these in the store (and in
-      // partialize below) means the Settings screen can edit them and the
-      // change survives a refresh.
       settings: {
         playerName: "Arjun",
-        handedness: "R", // "R" = right-handed, "L" = left-handed
+        handedness: "R",
       },
 
       updateSettings: (patch) =>
         set((state) => ({ settings: { ...state.settings, ...patch } })),
 
       // ---------- match lifecycle ----------
-      newMatchId: () => nextMatchId(get().matches),
+
+      newMatchId: () => makeMatchId((get().matchCounter || 0) + 1),
 
       startMatch: (setup) => {
-        const id = nextMatchId(get().matches);
-        const match = { ...initMatch(), id, ...setup };
-        set({
-          currentMatch: match,
-          currentRally: initRally(id, 0, 0, 0),
+        set((state) => {
+          const counter = (state.matchCounter || 0) + 1;
+          const id = makeMatchId(counter);
+          const match = { ...initMatch(), id, ...setup };
+          const rally = initRally(id, 0, 0, 0);
+
+          // If a match is already live, auto-park it so it isn't overwritten.
+          const parked = state.currentMatch && !state.currentMatch.completed
+            ? [...state.pausedMatches, packMatch(state.currentMatch, state.currentRally)]
+            : state.pausedMatches;
+
+          return {
+            matchCounter: counter,
+            currentMatch: match,
+            currentRally: rally,
+            pausedMatches: parked,
+          };
         });
       },
+
+      // Park the live match without discarding data.
+      pauseCurrentMatch: () => {
+        set((state) => {
+          if (!state.currentMatch) return {};
+          return {
+            pausedMatches: [...state.pausedMatches, packMatch(state.currentMatch, state.currentRally)],
+            currentMatch: null,
+            currentRally: null,
+          };
+        });
+      },
+
+      // Swap a paused match back into the live slot. If a live match is
+      // already present it gets auto-parked first (no data loss).
+      resumeMatch: (id) => {
+        set((state) => {
+          const idx = state.pausedMatches.findIndex((m) => m.id === id);
+          if (idx < 0) return {};
+          const { match, rally } = unpackMatch(state.pausedMatches[idx]);
+          const nextPaused = state.pausedMatches.filter((_, i) => i !== idx);
+          const parked = state.currentMatch && !state.currentMatch.completed
+            ? [...nextPaused, packMatch(state.currentMatch, state.currentRally)]
+            : nextPaused;
+          return {
+            currentMatch: match,
+            currentRally: rally || initRally(match.id, match.currentSet, match.sets[match.currentSet].sonScore, match.sets[match.currentSet].oppScore),
+            pausedMatches: parked,
+          };
+        });
+      },
+
+      discardPausedMatch: (id) =>
+        set((state) => ({
+          pausedMatches: state.pausedMatches.filter((m) => m.id !== id),
+        })),
 
       updateMatchMeta: (patch) =>
         set((state) => ({
@@ -92,8 +159,7 @@ export const useMatchStore = create(
           const sets = [...m.sets];
           const cur = sets[m.currentSet];
           const key = side === "S" ? "sonScore" : "oppScore";
-          const next = Math.max(0, cur[key] + delta);
-          sets[m.currentSet] = { ...cur, [key]: next };
+          sets[m.currentSet] = { ...cur, [key]: Math.max(0, cur[key] + delta) };
           return { currentMatch: { ...m, sets } };
         }),
 
@@ -125,7 +191,6 @@ export const useMatchStore = create(
         set((state) => {
           const r = state.currentRally; if (!r) return {};
           const shots = r.shots.map((s, i) => (i === index ? { ...s, ...patch } : s));
-          // re-derive code if grip/shotType/dir changed
           const s = shots[index];
           shots[index] = {
             ...s,
@@ -154,8 +219,6 @@ export const useMatchStore = create(
           return { currentRally: { ...r, shots: r.shots.filter((_, i) => i !== index) } };
         }),
 
-      // Undo: drop the last captured shot. Returns the dropped shot so UI can
-      // offer a "redo" toast if it wants to.
       popShot: () => {
         const r = get().currentRally;
         if (!r || r.shots.length === 0) return null;
@@ -203,15 +266,15 @@ export const useMatchStore = create(
           matches: data?.matches ?? [],
           currentMatch: data?.currentMatch ?? null,
           currentRally: data?.currentRally ?? null,
+          pausedMatches: data?.pausedMatches ?? [],
+          matchCounter: data?.matchCounter ?? (data?.matches?.length || 0),
         }),
 
-      // Convenience: derive the currently-active set object.
       currentSet: () => {
         const m = get().currentMatch;
         return m ? m.sets[m.currentSet] : null;
       },
 
-      // Convenience: running score string, used as rally `score` label.
       currentScoreString: () => {
         const s = get().currentSet();
         return s ? scoreString(s) : "0-0";
@@ -226,14 +289,36 @@ export const useMatchStore = create(
         matches: state.matches,
         currentMatch: state.currentMatch,
         currentRally: state.currentRally,
+        pausedMatches: state.pausedMatches,
+        matchCounter: state.matchCounter,
         settings: state.settings,
       }),
-      // Shallow-merge persisted state over defaults so older snapshots
-      // without `settings` still pick up the default preferences.
+      // v1 → v2 migration: backfill the fields added in v2 so existing
+      // localStorage snapshots don't read as empty.
+      migrate: (persisted, version) => {
+        if (!persisted) return persisted;
+        if (version < 2) {
+          // Seed matchCounter from whatever state we already have.
+          const archived = persisted.matches?.length || 0;
+          const live = persisted.currentMatch ? 1 : 0;
+          const maxId = [...(persisted.matches || []), persisted.currentMatch]
+            .filter(Boolean)
+            .map((m) => parseInt((m.id || "M0").slice(1), 10) || 0)
+            .reduce((a, b) => Math.max(a, b), 0);
+          return {
+            ...persisted,
+            schemaVersion: 2,
+            pausedMatches: persisted.pausedMatches || [],
+            matchCounter: Math.max(maxId, archived + live),
+          };
+        }
+        return persisted;
+      },
       merge: (persisted, current) => ({
         ...current,
         ...persisted,
         settings: { ...current.settings, ...(persisted?.settings || {}) },
+        pausedMatches: persisted?.pausedMatches || current.pausedMatches || [],
       }),
     }
   )

@@ -34,6 +34,7 @@ export default function Capture({ setScreen }) {
   const restartRally = useMatchStore((s) => s.restartRally);
   const nextSet = useMatchStore((s) => s.nextSet);
   const endMatch = useMatchStore((s) => s.endMatch);
+  const pauseCurrentMatch = useMatchStore((s) => s.pauseCurrentMatch);
 
   // --- local UI state (transient; not persisted) ---
   const [armedShot, setArmedShot] = useState(null);     // shot type waiting for a zone
@@ -198,6 +199,11 @@ export default function Capture({ setScreen }) {
 
   const handleEndMatch = () => { endMatch(); setScreen("summary"); };
 
+  const handlePauseMatch = () => {
+    pauseCurrentMatch();
+    setScreen("home");
+  };
+
   // ---------- render ----------
   const serverPicker = !rally.server && rally.shots.length === 0;
   const focusedQuality = focused?.quality || "Neutral";
@@ -302,6 +308,7 @@ export default function Capture({ setScreen }) {
           <div className="max-w-2xl mx-auto px-3 py-2 flex gap-2">
             <BarBtn onClick={handleRestart}>Restart rally</BarBtn>
             <BarBtn onClick={nextSet}>Next set</BarBtn>
+            <BarBtn onClick={handlePauseMatch} tone="warn">⏸ Pause</BarBtn>
             <BarBtn onClick={handleEndMatch} tone="danger">End match</BarBtn>
           </div>
         </div>
@@ -330,6 +337,8 @@ export default function Capture({ setScreen }) {
 function BarBtn({ children, onClick, tone }) {
   const cls = tone === "danger"
     ? "border-red-800/70 text-red-300 hover:bg-red-950/50"
+    : tone === "warn"
+    ? "border-amber-800/70 text-amber-300 hover:bg-amber-950/50"
     : "border-neutral-700 text-neutral-300 hover:bg-neutral-800";
   return (
     <button
