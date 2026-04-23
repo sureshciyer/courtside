@@ -47,6 +47,17 @@ export const useMatchStore = create(
       currentMatch: null, // { ...match, rallies: [finished] }
       currentRally: null, // rally being captured right now
 
+      // Persisted user preferences. Keeping these in the store (and in
+      // partialize below) means the Settings screen can edit them and the
+      // change survives a refresh.
+      settings: {
+        playerName: "Arjun",
+        handedness: "R", // "R" = right-handed, "L" = left-handed
+      },
+
+      updateSettings: (patch) =>
+        set((state) => ({ settings: { ...state.settings, ...patch } })),
+
       // ---------- match lifecycle ----------
       newMatchId: () => nextMatchId(get().matches),
 
@@ -215,6 +226,14 @@ export const useMatchStore = create(
         matches: state.matches,
         currentMatch: state.currentMatch,
         currentRally: state.currentRally,
+        settings: state.settings,
+      }),
+      // Shallow-merge persisted state over defaults so older snapshots
+      // without `settings` still pick up the default preferences.
+      merge: (persisted, current) => ({
+        ...current,
+        ...persisted,
+        settings: { ...current.settings, ...(persisted?.settings || {}) },
       }),
     }
   )

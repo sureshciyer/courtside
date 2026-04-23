@@ -7,6 +7,7 @@ import History from "./screens/History.jsx";
 import ExportScreen from "./screens/Export.jsx";
 import Patterns from "./screens/Patterns.jsx";
 import Report from "./screens/Report.jsx";
+import SettingsScreen from "./screens/Settings.jsx";
 
 const SCREENS = {
   home: Home,
@@ -17,6 +18,7 @@ const SCREENS = {
   exportScreen: ExportScreen,
   patterns: Patterns,
   report: Report,
+  settings: SettingsScreen,
 };
 
 export default function App() {

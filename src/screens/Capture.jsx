@@ -22,6 +22,7 @@ const SERVE_CODES = new Set(SHOT_CODES.serve.map((s) => s.code));
 export default function Capture({ setScreen }) {
   const m = useMatchStore((s) => s.currentMatch);
   const rally = useMatchStore((s) => s.currentRally);
+  const handedness = useMatchStore((s) => s.settings?.handedness) || "R";
   const setServer = useMatchStore((s) => s.setServer);
   const addShot = useMatchStore((s) => s.addShot);
   const updateShot = useMatchStore((s) => s.updateShot);
@@ -64,7 +65,7 @@ export default function Capture({ setScreen }) {
     let shotGrip = null;
     let shotDir = null;
     if (!isServeShot) {
-      shotGrip = guessGrip(zone, prevGrip);
+      shotGrip = guessGrip(zone, prevGrip, handedness);
       // If the user manually set a direction this arm cycle, respect that.
       // Otherwise auto-suggest from the prev vs next zone sides.
       shotDir = dirOverridden ? direction : suggestDirection(prevZone, zone, direction);
@@ -92,7 +93,7 @@ export default function Capture({ setScreen }) {
       // Also re-guess grip + direction when zone moves during an edit.
       const patch = { zone };
       if (!SERVE_CODES.has(focused.shotType)) {
-        patch.grip = guessGrip(zone, focused.grip);
+        patch.grip = guessGrip(zone, focused.grip, handedness);
         patch.dir = suggestDirection(
           focusedIdx > 0 ? rally.shots[focusedIdx - 1].zone : null,
           zone,

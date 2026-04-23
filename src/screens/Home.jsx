@@ -55,7 +55,13 @@ export default function Home({ setScreen }) {
         </>
       )}
 
-      <div className="mt-auto pt-6 text-center">
+      <div className="mt-auto pt-6 text-center flex flex-col items-center gap-2">
+        <button
+          onClick={() => setScreen("settings")}
+          className="text-xs text-neutral-400 hover:text-neutral-200 border border-neutral-800 hover:border-neutral-600 rounded-full px-3 py-1.5 transition"
+        >
+          ⚙ Settings
+        </button>
         <div className="text-[10px] uppercase tracking-[0.2em] text-neutral-600 font-semibold">
           {n} match{n !== 1 ? "es" : ""} · {totalRallies} rallies stored
         </div>

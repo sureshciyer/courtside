@@ -87,14 +87,16 @@ export const ZONE_SIDE = {
   3: "R", 6: "R", 9: "R",
 };
 
-// Guess the grip for a shot landing in `zone`. Right-hander default —
-// left-side zones → Backhand, right-side → Forehand, middle zones inherit
-// the previous grip (or default Forehand on the opening shot).
-export const guessGrip = (zone, previousGrip = null) => {
+// Guess the grip for a shot landing in `zone`.
+// - Right-hander (default): left-side zones (1/4/7) → Backhand, right-side
+//   (3/6/9) → Forehand.
+// - Left-hander: flipped — left-side zones → Forehand, right-side → Backhand.
+// Middle zones (2/5/8) inherit the previous grip (or default Forehand).
+export const guessGrip = (zone, previousGrip = null, handedness = "R") => {
   const side = ZONE_SIDE[zone];
-  if (side === "L") return "B";
-  if (side === "R") return "F";
-  return previousGrip || "F";
+  if (side === "M" || !side) return previousGrip || "F";
+  if (handedness === "L") return side === "L" ? "F" : "B";
+  return side === "L" ? "B" : "F";
 };
 
 // Suggest a direction based on the previous landing zone. If the next zone

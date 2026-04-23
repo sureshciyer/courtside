@@ -1,7 +1,7 @@
 import { useMemo } from "react";
 import { useMatchStore } from "../store/useMatchStore.js";
 import { reportBundle, matchSummary, classifyStyle, setAggregate, pct } from "../lib/analytics.js";
-import { SHOT_NAMES, ZONE_LABELS, PLAYER_NAME } from "../constants/badminton.js";
+import { SHOT_NAMES, ZONE_LABELS } from "../constants/badminton.js";
 import { Screen, TopBar, Card, BigBtn } from "../components/ui.jsx";
 
 // ===== Pro-level performance report. Each section is driven by the real
@@ -11,6 +11,7 @@ import { Screen, TopBar, Card, BigBtn } from "../components/ui.jsx";
 
 export default function Report({ setScreen }) {
   const matches = useMatchStore((s) => s.matches);
+  const playerName = useMatchStore((s) => s.settings?.playerName) || "Player";
   const bundle = useMemo(() => reportBundle(matches), [matches]);
 
   const scrollTo = (id) => {
@@ -47,7 +48,7 @@ export default function Report({ setScreen }) {
     <Screen wide className="report-root">
       <TopBar
         title="Performance report"
-        subtitle={`${PLAYER_NAME} · ${matches.length} match${matches.length !== 1 ? "es" : ""} · ${agg.rallies} rallies`}
+        subtitle={`${playerName} · ${matches.length} match${matches.length !== 1 ? "es" : ""} · ${agg.rallies} rallies`}
         onBack={() => setScreen("home")}
         right={<PrintBtn onClick={printReport} />}
       />
@@ -56,7 +57,7 @@ export default function Report({ setScreen }) {
       <div className="border-b-2 border-emerald-700 pb-3 mb-4 print:border-black">
         <div className="text-[10px] tracking-[0.25em] uppercase text-neutral-500">Player performance report</div>
         <h1 className="text-2xl sm:text-3xl font-extrabold text-emerald-400 print:text-black">
-          {PLAYER_NAME} — Comprehensive analysis
+          {playerName} — Comprehensive analysis
         </h1>
         <div className="text-xs text-neutral-400 mt-1">
           {tournaments.length} tournament{tournaments.length !== 1 ? "s" : ""} ·{" "}
@@ -368,7 +369,7 @@ export default function Report({ setScreen }) {
         Zone 1 is Front-Left from the player's own perspective, Zone 9 is Back-Right.
       </p>
       <div className="max-w-xs mx-auto">
-        <ZoneDiagram />
+        <ZoneDiagram playerName={playerName} />
       </div>
 
       <SH id="app-codes" n="C" t="Shot code reference" />
@@ -394,7 +395,7 @@ export default function Report({ setScreen }) {
       </div>
 
       <div className="text-center py-6 text-[10px] text-neutral-600 border-t border-neutral-800 mt-6 print:border-neutral-400">
-        Courtside Performance Analysis · {PLAYER_NAME} · Generated {new Date().toLocaleDateString()}
+        Courtside Performance Analysis · {playerName} · Generated {new Date().toLocaleDateString()}
         <div className="mt-2">
           <button
             onClick={() => scrollTo("toc")}
@@ -752,7 +753,7 @@ function AppTable({ rows }) {
 function Th({ children }) { return <th className="px-2 py-1.5 text-left font-semibold border-b border-neutral-700 print:border-neutral-400">{children}</th>; }
 function Td({ children, className = "" }) { return <td className={`px-2 py-1 border-b border-neutral-800 print:border-neutral-300 ${className}`}>{children}</td>; }
 
-function ZoneDiagram() {
+function ZoneDiagram({ playerName = "Player" }) {
   return (
     <div>
       <div className="bg-red-950/50 border border-red-900 rounded-t-lg p-2 print:bg-red-50 print:border-red-300">
@@ -768,7 +769,7 @@ function ZoneDiagram() {
         <div className="grid grid-cols-3 gap-1">
           {[1, 2, 3, 4, 5, 6, 7, 8, 9].map((z) => <ZoneCell key={z} n={z} />)}
         </div>
-        <div className="text-center text-[10px] text-sky-300 font-semibold mt-2 print:text-black">{PLAYER_NAME.toUpperCase()}'S COURT</div>
+        <div className="text-center text-[10px] text-sky-300 font-semibold mt-2 print:text-black">{playerName.toUpperCase()}'S COURT</div>
       </div>
     </div>
   );
