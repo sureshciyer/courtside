@@ -232,6 +232,98 @@ export const useMatchStore = create(
           currentRally: state.currentRally ? { ...state.currentRally, result } : null,
         })),
 
+      // ---------- edits on FINISHED rallies in the live match ----------
+      // Lets the RallyLogSheet correct past mistakes without forcing the
+      // user to re-enter a rally. Any change to a rally's result/winner
+      // also reconciles the set score to keep the scoreboard honest.
+
+      updateFinishedRally: (index, patch) =>
+        set((state) => {
+          const m = state.currentMatch; if (!m || !m.rallies[index]) return {};
+          const rallies = [...m.rallies];
+          rallies[index] = { ...rallies[index], ...patch };
+          return { currentMatch: { ...m, rallies } };
+        }),
+
+      // Flip Son↔Opp on a saved rally and move ±1 point between the set's
+      // scores. `currentRally.score` is re-synced if the edited rally sits
+      // in the current set so the next rally carries the corrected score.
+      flipFinishedRallyWinner: (index) =>
+        set((state) => {
+          const m = state.currentMatch; if (!m) return {};
+          const rally = m.rallies[index]; if (!rally) return {};
+          const wasSon = rally.pointWonBy === "S";
+          const rallies = [...m.rallies];
+          rallies[index] = { ...rally, pointWonBy: wasSon ? "O" : "S" };
+
+          const sets = m.sets.map((s, i) => {
+            if (i !== rally.set - 1) return s;
+            return wasSon
+              ? { sonScore: Math.max(0, s.sonScore - 1), oppScore: s.oppScore + 1 }
+              : { sonScore: s.sonScore + 1, oppScore: Math.max(0, s.oppScore - 1) };
+          });
+
+          let nextRally = state.currentRally;
+          const isCurrentSet = rally.set - 1 === m.currentSet;
+          if (isCurrentSet && nextRally && nextRally.shots.length === 0) {
+            const cur = sets[m.currentSet];
+            nextRally = { ...nextRally, score: `${cur.sonScore}-${cur.oppScore}`, phase: computePhase(cur.sonScore, cur.oppScore) };
+          }
+          return { currentMatch: { ...m, rallies, sets }, currentRally: nextRally };
+        }),
+
+      // Remove a saved rally and roll back the 1 point it contributed to
+      // the set's tally. Subsequent rallies' stored pre-rally `score`
+      // labels are left as-is (historical record), but the running total
+      // on the scoreboard is corrected.
+      deleteFinishedRally: (index) =>
+        set((state) => {
+          const m = state.currentMatch; if (!m) return {};
+          const rally = m.rallies[index]; if (!rally) return {};
+          const rallies = m.rallies.filter((_, i) => i !== index);
+          const sets = m.sets.map((s, i) => {
+            if (i !== rally.set - 1) return s;
+            return rally.pointWonBy === "S"
+              ? { ...s, sonScore: Math.max(0, s.sonScore - 1) }
+              : { ...s, oppScore: Math.max(0, s.oppScore - 1) };
+          });
+
+          let nextRally = state.currentRally;
+          const isCurrentSet = rally.set - 1 === m.currentSet;
+          if (isCurrentSet && nextRally && nextRally.shots.length === 0) {
+            const cur = sets[m.currentSet];
+            nextRally = { ...nextRally, score: `${cur.sonScore}-${cur.oppScore}`, phase: computePhase(cur.sonScore, cur.oppScore) };
+          }
+          return { currentMatch: { ...m, rallies, sets }, currentRally: nextRally };
+        }),
+
+      updateFinishedRallyShot: (rallyIdx, shotIdx, patch) =>
+        set((state) => {
+          const m = state.currentMatch; if (!m) return {};
+          const rally = m.rallies[rallyIdx]; if (!rally) return {};
+          const shots = rally.shots.map((s, i) => {
+            if (i !== shotIdx) return s;
+            const merged = { ...s, ...patch };
+            return {
+              ...merged,
+              code: merged.grip && merged.dir ? `${merged.grip}-${merged.shotType}-${merged.dir}` : merged.shotType,
+            };
+          });
+          const rallies = [...m.rallies];
+          rallies[rallyIdx] = { ...rally, shots };
+          return { currentMatch: { ...m, rallies } };
+        }),
+
+      deleteFinishedRallyShot: (rallyIdx, shotIdx) =>
+        set((state) => {
+          const m = state.currentMatch; if (!m) return {};
+          const rally = m.rallies[rallyIdx]; if (!rally) return {};
+          const shots = rally.shots.filter((_, i) => i !== shotIdx);
+          const rallies = [...m.rallies];
+          rallies[rallyIdx] = { ...rally, shots };
+          return { currentMatch: { ...m, rallies } };
+        }),
+
       restartRally: () =>
         set((state) => {
           const m = state.currentMatch; if (!m) return {};
