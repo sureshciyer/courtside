@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useMatchStore } from "../store/useMatchStore.js";
-import { Screen, TopBar, BigBtn } from "../components/ui.jsx";
+import { Screen, TopBar, BigBtn, Card } from "../components/ui.jsx";
 
 export default function Export({ setScreen }) {
   const matches = useMatchStore((s) => s.matches);
@@ -37,51 +37,48 @@ export default function Export({ setScreen }) {
 
   return (
     <Screen>
-      <TopBar title="Export" onBack={() => setScreen("home")} />
-      <div style={{ textAlign: "center", padding: "1rem 0" }}>
-        <div style={{ fontSize: 28, marginBottom: 8 }}>📊</div>
-        <p style={{ fontSize: 13, color: "#78909c" }}>
+      <TopBar title="Export data" onBack={() => setScreen("home")} />
+
+      <Card className="mb-3 text-center">
+        <div className="text-3xl mb-1">📊</div>
+        <div className="font-bold text-white">
           {matches.length} match{matches.length !== 1 ? "es" : ""} · {total} rallies
-        </p>
-      </div>
+        </div>
+        <div className="text-[11px] text-neutral-500 mt-1">All data is stored locally — nothing leaves your device.</div>
+      </Card>
 
-      <div style={{ background: "#f5f5f5", borderRadius: 10, padding: 14, marginBottom: 16, fontSize: 13, color: "#546e7a", lineHeight: 1.7 }}>
-        <div style={{ fontWeight: 700, color: "#37474f", marginBottom: 6 }}>How to export:</div>
-        1. Download a JSON backup, or copy data for analysis<br />
-        2. For chat analysis: paste the copied text as a new message<br />
-        3. Claude will return a CSV you can download
-      </div>
+      <Card tone="accent" className="mb-3">
+        <div className="text-[10px] uppercase tracking-wider text-emerald-300 font-semibold mb-2">How to export</div>
+        <ol className="text-sm text-neutral-300 space-y-1.5 list-decimal list-inside leading-relaxed">
+          <li>Download a JSON backup, or copy data for chat analysis</li>
+          <li>For chat: paste into a new message here</li>
+          <li>Claude will return a CSV you can download</li>
+        </ol>
+      </Card>
 
-      <BigBtn bg="#1B5E20" color="#fff" onClick={downloadJson}>Download Match JSON</BigBtn>
-      <BigBtn bg="#e3f2fd" color="#0d47a1" onClick={copyData}>
-        {copied ? "Copied! Now paste in chat" : "Copy data for chat analysis"}
+      <BigBtn tone="primary" onClick={downloadJson}>Download match JSON</BigBtn>
+      <BigBtn tone="info" onClick={copyData}>
+        {copied ? "Copied — paste in chat" : "Copy data for chat analysis"}
       </BigBtn>
-
       {copied && (
-        <p style={{ textAlign: "center", color: "#4caf50", fontSize: 13, fontWeight: 600, marginTop: 4 }}>
-          Now switch to the chat and paste (long-press → Paste)
-        </p>
+        <p className="text-center text-emerald-400 text-xs font-semibold mt-1">Now switch to the chat and paste</p>
       )}
 
-      <div style={{ marginTop: 8 }}>
-        <button onClick={() => setShowData(!showData)} style={{
-          background: "none", border: "none", color: "#90a4ae", fontSize: 12,
-          cursor: "pointer", textDecoration: "underline", fontFamily: "Outfit",
-        }}>
-          {showData ? "Hide raw data" : "If copy doesn't work, tap here to show data"}
-        </button>
-      </div>
+      <button
+        onClick={() => setShowData(!showData)}
+        className="text-center text-xs text-neutral-500 hover:text-neutral-300 underline mt-4 self-center"
+      >
+        {showData ? "Hide raw data" : "If copy doesn't work, show the data"}
+      </button>
 
       {showData && (
-        <div style={{ marginTop: 8 }}>
-          <p style={{ fontSize: 12, color: "#78909c", marginBottom: 6 }}>
-            Select all the text below, copy it, and paste it in the chat:
-          </p>
-          <textarea readOnly value={payload} style={{
-            width: "100%", minHeight: 150, padding: 10, borderRadius: 8,
-            border: "1px solid #e0e0e0", fontSize: 11, fontFamily: "JetBrains Mono",
-            resize: "vertical", boxSizing: "border-box", background: "#fafafa", color: "#333",
-          }} />
+        <div className="mt-3">
+          <p className="text-[11px] text-neutral-500 mb-2">Select all text below, copy, and paste into the chat:</p>
+          <textarea
+            readOnly
+            value={payload}
+            className="w-full min-h-[160px] p-3 rounded-lg border border-neutral-800 bg-neutral-900 text-neutral-300 text-[11px] font-mono resize-y"
+          />
         </div>
       )}
     </Screen>

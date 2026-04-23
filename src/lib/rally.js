@@ -72,3 +72,48 @@ export const formatShotCode = ({ grip, shotType, dir }) => {
 
 export const nextMatchId = (matches) =>
   `M${String(matches.length + 1).padStart(3, "0")}`;
+
+// ---------- Smart contextual defaults ----------
+
+// 9-zone layout with the net at the top (rendered in CourtGrid):
+//   1 2 3   ← front
+//   4 5 6
+//   7 8 9   ← back
+// The left column (1,4,7) and right column (3,6,9) correspond to the
+// player's backhand / forehand sides respectively for a right-hander.
+export const ZONE_SIDE = {
+  1: "L", 4: "L", 7: "L",
+  2: "M", 5: "M", 8: "M",
+  3: "R", 6: "R", 9: "R",
+};
+
+// Guess the grip for a shot landing in `zone`. Right-hander default —
+// left-side zones → Backhand, right-side → Forehand, middle zones inherit
+// the previous grip (or default Forehand on the opening shot).
+export const guessGrip = (zone, previousGrip = null) => {
+  const side = ZONE_SIDE[zone];
+  if (side === "L") return "B";
+  if (side === "R") return "F";
+  return previousGrip || "F";
+};
+
+// Suggest a direction based on the previous landing zone. If the next zone
+// is on the opposite side of the court, we assume a cross-court hit; same
+// side → straight. Middle (M) zones keep the last used direction.
+export const suggestDirection = (prevZone, nextZone, lastDir = "ST") => {
+  if (!prevZone || !nextZone) return lastDir || "ST";
+  const a = ZONE_SIDE[prevZone];
+  const b = ZONE_SIDE[nextZone];
+  if (!a || !b) return lastDir || "ST";
+  if (a === "M" || b === "M") return lastDir || "ST";
+  return a === b ? "ST" : "CR";
+};
+
+// Cycle through allowed options — used by the Timeline card's tap-to-toggle
+// on grip / direction segments.
+export const cycleGrip = (g) => (g === "F" ? "B" : "F");
+export const cycleDirection = (d) => {
+  const order = ["ST", "CR", "BD"];
+  const i = order.indexOf(d);
+  return order[(i + 1) % order.length] || "ST";
+};

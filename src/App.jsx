@@ -17,18 +17,8 @@ const SCREENS = {
   patterns: Patterns,
 };
 
-// Screens that manage their own full-width dark chrome.
-const FULL_WIDTH = new Set(["capture"]);
-
 export default function App() {
   const [screen, setScreen] = useState("home");
   const Current = SCREENS[screen] || Home;
-
-  if (FULL_WIDTH.has(screen)) return <Current setScreen={setScreen} />;
-
-  return (
-    <div style={{ maxWidth: 420, margin: "0 auto", minHeight: "100vh", fontFamily: "Outfit,sans-serif" }}>
-      <Current setScreen={setScreen} />
-    </div>
-  );
+  return <Current setScreen={setScreen} />;
 }

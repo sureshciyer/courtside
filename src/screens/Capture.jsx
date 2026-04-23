@@ -1,9 +1,14 @@
 import { useEffect, useState } from "react";
 import { useMatchStore } from "../store/useMatchStore.js";
-import { autoRole, OPENING_LENGTH } from "../lib/rally.js";
+import {
+  autoRole,
+  OPENING_LENGTH,
+  guessGrip,
+  suggestDirection,
+  cycleGrip,
+  cycleDirection,
+} from "../lib/rally.js";
 import { DISRUPTION_SHOTS, SHOT_CODES } from "../constants/badminton.js";
-
-const SERVE_CODES = new Set(SHOT_CODES.serve.map((s) => s.code));
 import Scoreboard from "../components/capture/Scoreboard.jsx";
 import Timeline from "../components/capture/Timeline.jsx";
 import CourtGrid from "../components/capture/CourtGrid.jsx";
@@ -11,6 +16,8 @@ import ShotPalette from "../components/capture/ShotPalette.jsx";
 import QualityToggle from "../components/capture/QualityToggle.jsx";
 import ServerPicker from "../components/capture/ServerPicker.jsx";
 import ResultBar from "../components/capture/ResultBar.jsx";
+
+const SERVE_CODES = new Set(SHOT_CODES.serve.map((s) => s.code));
 
 export default function Capture({ setScreen }) {
   const m = useMatchStore((s) => s.currentMatch);
@@ -27,10 +34,12 @@ export default function Capture({ setScreen }) {
   const endMatch = useMatchStore((s) => s.endMatch);
 
   // --- local UI state (transient; not persisted) ---
-  const [armedShot, setArmedShot] = useState(null);    // shot type waiting for a zone
-  const [quality, setQuality] = useState("Neutral");   // default quality for the next commit
-  const [focusedIdx, setFocusedIdx] = useState(null);  // index of the shot being edited
-  const [finishAfter, setFinishAfter] = useState(false); // next commit triggers end-of-rally
+  const [armedShot, setArmedShot] = useState(null);     // shot type waiting for a zone
+  const [quality, setQuality] = useState("Neutral");    // default quality for the next commit
+  const [direction, setDirection] = useState("ST");     // sticky direction for the next commit
+  const [dirOverridden, setDirOverridden] = useState(false); // user manually touched direction during the current arm
+  const [focusedIdx, setFocusedIdx] = useState(null);
+  const [finishAfter, setFinishAfter] = useState(false);
   const [showResult, setShowResult] = useState(false);
   const [pendingResult, setPendingResult] = useState(null);
   const [toast, setToast] = useState(null);
@@ -46,18 +55,32 @@ export default function Capture({ setScreen }) {
     ? SERVE_CODES.has(focused?.shotType) ? "serve" : "shot"
     : isFirstShot ? "serve" : "shot";
 
+  const prevZone = rally.shots.length > 0 ? rally.shots[rally.shots.length - 1].zone : null;
+  const prevGrip = rally.shots.length > 0 ? rally.shots[rally.shots.length - 1].grip : null;
+
   // ---------- commit / edit handlers ----------
   const commitNewShot = (shotType, zone) => {
-    const isServe = paletteMode === "serve" && isFirstShot && !isEditing;
+    const isServeShot = paletteMode === "serve" && isFirstShot;
+    let shotGrip = null;
+    let shotDir = null;
+    if (!isServeShot) {
+      shotGrip = guessGrip(zone, prevGrip);
+      // If the user manually set a direction this arm cycle, respect that.
+      // Otherwise auto-suggest from the prev vs next zone sides.
+      shotDir = dirOverridden ? direction : suggestDirection(prevZone, zone, direction);
+    }
     addShot({
-      grip: null,
+      grip: shotGrip,
       shotType,
-      dir: null,
+      dir: shotDir,
       zone,
-      role: isServe ? "opening" : autoRole(rally.shots.length, shotType),
+      role: isServeShot ? "opening" : autoRole(rally.shots.length, shotType),
       quality,
     });
+    // Reset arm state; carry direction forward as the new sticky default.
     setArmedShot(null);
+    setDirOverridden(false);
+    if (shotDir) setDirection(shotDir);
     if (finishAfter) {
       setFinishAfter(false);
       setShowResult(true);
@@ -66,22 +89,27 @@ export default function Capture({ setScreen }) {
 
   const handleZoneTap = (zone) => {
     if (isEditing) {
-      updateShot(focusedIdx, { zone });
+      // Also re-guess grip + direction when zone moves during an edit.
+      const patch = { zone };
+      if (!SERVE_CODES.has(focused.shotType)) {
+        patch.grip = guessGrip(zone, focused.grip);
+        patch.dir = suggestDirection(
+          focusedIdx > 0 ? rally.shots[focusedIdx - 1].zone : null,
+          zone,
+          focused.dir || "ST",
+        );
+      }
+      updateShot(focusedIdx, patch);
       flash(`Zone → ${zone}`);
       return;
     }
-    if (!armedShot) {
-      flash("Pick a shot first");
-      return;
-    }
+    if (!armedShot) { flash("Pick a shot first"); return; }
     commitNewShot(armedShot, zone);
   };
 
   const handleShotArm = (shotType) => {
     if (isEditing) {
       const patch = { shotType };
-      // Re-suggest disruption tag when the new shot type qualifies and we're
-      // past the opening. Leave "opening"/"finish" roles untouched.
       const pastOpening = focusedIdx >= OPENING_LENGTH;
       if (pastOpening && DISRUPTION_SHOTS.has(shotType) && focused.role === "neutral") {
         patch.role = "disruption";
@@ -93,6 +121,16 @@ export default function Capture({ setScreen }) {
     setArmedShot(shotType);
   };
 
+  const handleDirectionChange = (d) => {
+    if (isEditing) {
+      updateShot(focusedIdx, { dir: d });
+      flash(`Dir → ${d}`);
+      return;
+    }
+    setDirection(d);
+    setDirOverridden(true);
+  };
+
   const handleQualityChange = (q) => {
     if (isEditing) {
       setShotQuality(focusedIdx, q);
@@ -102,11 +140,28 @@ export default function Capture({ setScreen }) {
     }
   };
 
+  const handleCycleGrip = (i) => {
+    const s = rally.shots[i];
+    if (SERVE_CODES.has(s.shotType)) return;
+    const next = cycleGrip(s.grip);
+    updateShot(i, { grip: next });
+    flash(`Grip → ${next === "F" ? "Forehand" : "Backhand"}`);
+  };
+
+  const handleCycleDir = (i) => {
+    const s = rally.shots[i];
+    if (SERVE_CODES.has(s.shotType)) return;
+    const next = cycleDirection(s.dir);
+    updateShot(i, { dir: next });
+    flash(`Dir → ${next}`);
+  };
+
   const handleUndo = () => {
     const popped = popShot();
     if (popped) flash(`Undid ${popped.code}`);
     setArmedShot(null);
     setFocusedIdx(null);
+    setDirOverridden(false);
   };
 
   const handleDeleteFocused = () => {
@@ -123,6 +178,8 @@ export default function Capture({ setScreen }) {
     setArmedShot(null);
     setFocusedIdx(null);
     setFinishAfter(false);
+    setDirection("ST");
+    setDirOverridden(false);
     flash("Rally saved");
   };
 
@@ -132,16 +189,16 @@ export default function Capture({ setScreen }) {
     setFocusedIdx(null);
     setShowResult(false);
     setFinishAfter(false);
+    setDirection("ST");
+    setDirOverridden(false);
   };
 
-  const handleEndMatch = () => {
-    endMatch();
-    setScreen("summary");
-  };
+  const handleEndMatch = () => { endMatch(); setScreen("summary"); };
 
   // ---------- render ----------
   const serverPicker = !rally.server && rally.shots.length === 0;
   const focusedQuality = focused?.quality || "Neutral";
+  const displayDirection = isEditing ? (focused.dir || "ST") : direction;
 
   return (
     <div className="capture-dark min-h-screen flex flex-col bg-neutral-950 text-neutral-100 font-display">
@@ -158,6 +215,8 @@ export default function Capture({ setScreen }) {
         focusedIdx={focusedIdx}
         onFocus={(i) => { setFocusedIdx(focusedIdx === i ? null : i); setArmedShot(null); }}
         onUndo={handleUndo}
+        onCycleGrip={handleCycleGrip}
+        onCycleDir={handleCycleDir}
       />
 
       {/* Edit / capture toolbar */}
@@ -210,18 +269,19 @@ export default function Capture({ setScreen }) {
                 editing={isEditing}
               />
             </div>
-            <div className="min-h-0">
+            <div className="min-h-0 flex flex-col">
               <ShotPalette
                 mode={paletteMode}
                 armedShot={isEditing ? focused.shotType : armedShot}
                 onArm={handleShotArm}
+                direction={displayDirection}
+                onDirectionChange={handleDirectionChange}
               />
             </div>
           </div>
         )}
       </div>
 
-      {/* Bottom action bar (when no result sheet is open) */}
       {!showResult && (
         <div className="fixed inset-x-0 bottom-0 z-30 bg-neutral-950/95 border-t border-neutral-800 backdrop-blur">
           <div className="max-w-2xl mx-auto px-3 py-2 flex gap-2">

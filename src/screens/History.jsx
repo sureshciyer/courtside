@@ -1,35 +1,45 @@
 import { useMatchStore } from "../store/useMatchStore.js";
-import { Screen, TopBar } from "../components/ui.jsx";
+import { Screen, TopBar, Card, Badge } from "../components/ui.jsx";
 
 export default function History({ setScreen }) {
   const matches = useMatchStore((s) => s.matches);
   return (
     <Screen>
-      <TopBar title="Match history" onBack={() => setScreen("home")} />
+      <TopBar title="Match history" subtitle={`${matches.length} completed`} onBack={() => setScreen("home")} />
       {matches.length === 0 && (
-        <p style={{ color: "#90a4ae", textAlign: "center", marginTop: "2rem" }}>No matches yet</p>
+        <div className="text-center text-neutral-500 mt-10 text-sm">No matches yet — start one from the home screen.</div>
       )}
-      {[...matches].reverse().map((m, i) => {
-        const w = m.rallies.filter((r) => r.pointWonBy === "S").length;
-        const l = m.rallies.filter((r) => r.pointWonBy === "O").length;
-        return (
-          <div key={i} style={{ background: "#fff", border: "1px solid #e0e0e0", borderRadius: 10, padding: 12, marginBottom: 8 }}>
-            <div style={{ display: "flex", justifyContent: "space-between" }}>
-              <span style={{ fontFamily: "JetBrains Mono", fontSize: 11, color: "#90a4ae" }}>{m.id}</span>
-              <span style={{ fontSize: 11, color: "#90a4ae" }}>{m.date}</span>
-            </div>
-            <div style={{ fontWeight: 700, fontSize: 15, margin: "4px 0" }}>vs {m.opponent}</div>
-            <div style={{ fontSize: 13, color: "#546e7a" }}>
-              {m.sets.map((s) => `${s.sonScore}-${s.oppScore}`).join(", ")}
-              <span style={{ marginLeft: 8, color: w > l ? "#4caf50" : "#ef5350" }}>({w}W-{l}L)</span>
-            </div>
-            {m.tournament && <div style={{ fontSize: 11, color: "#90a4ae", marginTop: 2 }}>{m.tournament}</div>}
-            {m.playerStyle && m.playerStyle !== "Unknown" && (
-              <div style={{ fontSize: 11, color: "#e65100", marginTop: 2 }}>Opponent style: {m.playerStyle}</div>
-            )}
-          </div>
-        );
-      })}
+      <div className="flex flex-col gap-2">
+        {[...matches].reverse().map((m) => {
+          const w = m.rallies.filter((r) => r.pointWonBy === "S").length;
+          const l = m.rallies.filter((r) => r.pointWonBy === "O").length;
+          const setWins = m.sets.filter((s) => s.sonScore > s.oppScore).length;
+          const matchWon = setWins > m.sets.length / 2;
+          return (
+            <Card key={m.id} tone={matchWon ? "accent" : "default"}>
+              <div className="flex items-start justify-between gap-3 mb-1.5">
+                <div className="min-w-0">
+                  <div className="font-bold text-white truncate">vs {m.opponent}</div>
+                  <div className="text-[11px] text-neutral-500 font-mono">{m.id} · {m.date}</div>
+                </div>
+                <Badge tone={matchWon ? "default" : "danger"}>{matchWon ? "WON" : "LOST"}</Badge>
+              </div>
+              <div className="font-mono text-sm text-neutral-300">
+                {m.sets.map((s, i) => (
+                  <span key={i} className={`mr-3 ${s.sonScore > s.oppScore ? "text-emerald-300" : "text-red-300"}`}>
+                    {s.sonScore}-{s.oppScore}
+                  </span>
+                ))}
+                <span className="text-neutral-500">({w}W · {l}L)</span>
+              </div>
+              {m.tournament && <div className="text-[11px] text-neutral-500 mt-1">{m.tournament}</div>}
+              {m.playerStyle && m.playerStyle !== "Unknown" && (
+                <div className="text-[11px] text-amber-300/90 mt-0.5">Opponent style: {m.playerStyle}</div>
+              )}
+            </Card>
+          );
+        })}
+      </div>
     </Screen>
   );
 }

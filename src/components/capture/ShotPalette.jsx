@@ -1,28 +1,72 @@
 import { SHOT_CODES, DISRUPTION_SHOTS } from "../../constants/badminton.js";
+import { DIRS } from "../../constants/badminton.js";
 
 // Shot-type palette for the right half of the capture screen. Shows either
-// the serve row (on the first shot of a rally) or the Front/Mid/Rear groups.
-// Tapping a shot arms it; the next zone tap commits. Tapping while editing
-// updates the focused shot's shotType directly.
-export default function ShotPalette({ mode, armedShot, onArm }) {
-  if (mode === "serve") {
-    return (
-      <div className="flex flex-col gap-2">
-        <GroupLabel>Serve</GroupLabel>
-        <div className="grid grid-cols-3 gap-1.5">
-          {SHOT_CODES.serve.map((s) => (
-            <ShotBtn key={s.code} tone="serve" code={s.code} label={s.label} armed={armedShot === s.code} onTap={() => onArm(s.code)} />
-          ))}
-        </div>
-      </div>
-    );
-  }
-
+// the serve row (on the first shot of a rally) or the Front/Mid/Rear groups,
+// plus a sticky direction quick-toggle that carries over between shots.
+export default function ShotPalette({
+  mode,
+  armedShot,
+  onArm,
+  direction,
+  onDirectionChange,
+  showDirection = true,
+}) {
+  const isServe = mode === "serve";
   return (
-    <div className="flex flex-col gap-2 overflow-y-auto pr-0.5 no-scrollbar">
-      <Group tone="rear" label="Rear" shots={SHOT_CODES.rear} armedShot={armedShot} onArm={onArm} />
-      <Group tone="mid" label="Mid" shots={SHOT_CODES.mid} armedShot={armedShot} onArm={onArm} />
-      <Group tone="front" label="Front" shots={SHOT_CODES.front} armedShot={armedShot} onArm={onArm} />
+    <div className="flex flex-col gap-2 h-full min-h-0">
+      {showDirection && !isServe && (
+        <DirectionToggle value={direction} onChange={onDirectionChange} />
+      )}
+      {isServe ? (
+        <>
+          <GroupLabel>Serve</GroupLabel>
+          <div className="grid grid-cols-3 gap-1.5">
+            {SHOT_CODES.serve.map((s) => (
+              <ShotBtn
+                key={s.code}
+                tone="serve"
+                code={s.code}
+                label={s.label}
+                armed={armedShot === s.code}
+                onTap={() => onArm(s.code)}
+              />
+            ))}
+          </div>
+        </>
+      ) : (
+        <div className="flex flex-col gap-2 overflow-y-auto pr-0.5 no-scrollbar">
+          <Group tone="rear" label="Rear" shots={SHOT_CODES.rear} armedShot={armedShot} onArm={onArm} />
+          <Group tone="mid" label="Mid" shots={SHOT_CODES.mid} armedShot={armedShot} onArm={onArm} />
+          <Group tone="front" label="Front" shots={SHOT_CODES.front} armedShot={armedShot} onArm={onArm} />
+        </div>
+      )}
+    </div>
+  );
+}
+
+// Sticky direction quick-toggle. Displayed above the shot buttons so the user
+// can flip ST/CR/BD before picking a zone; the parent can also push an
+// auto-suggested value (e.g. CR when the zone is on the opposite side).
+function DirectionToggle({ value, onChange }) {
+  return (
+    <div className="flex items-center gap-2">
+      <span className="text-[10px] uppercase tracking-wider text-neutral-500 font-semibold">Dir</span>
+      <div className="flex flex-1 gap-1 p-0.5 rounded-lg bg-neutral-950 border border-neutral-800">
+        {DIRS.map((d) => {
+          const active = value === d.code;
+          return (
+            <button
+              key={d.code}
+              onClick={() => onChange(d.code)}
+              className={`flex-1 py-1 rounded-md font-mono text-[11px] font-bold tracking-tight transition ${active ? "bg-emerald-700 text-white" : "text-neutral-400 hover:text-white hover:bg-neutral-800"}`}
+              title={d.label}
+            >
+              {d.code}
+            </button>
+          );
+        })}
+      </div>
     </div>
   );
 }

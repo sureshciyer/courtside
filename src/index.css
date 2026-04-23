@@ -6,12 +6,10 @@ html, body, #root { height: 100%; }
 body {
   margin: 0;
   font-family: "Outfit", system-ui, sans-serif;
-  background: #fafafa;
-  color: #212121;
+  background: #0a0a0a;
+  color: #e5e7eb;
   -webkit-font-smoothing: antialiased;
 }
-
-body:has(.capture-dark) { background: #0a0a0a; }
 
 @keyframes cs-fade-in {
   from { opacity: 0; transform: translateX(-50%) translateY(-8px); }

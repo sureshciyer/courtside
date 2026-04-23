@@ -1,5 +1,5 @@
 import { useMatchStore } from "../store/useMatchStore.js";
-import { Screen, TopBar, Stat, BigBtn } from "../components/ui.jsx";
+import { Screen, TopBar, Stat, BigBtn, Card } from "../components/ui.jsx";
 
 export default function Summary({ setScreen }) {
   const matches = useMatchStore((s) => s.matches);
@@ -14,31 +14,53 @@ export default function Summary({ setScreen }) {
   const cl = r.filter((x) => x.phase === "Clutch");
   const cw = cl.filter((x) => x.pointWonBy === "S").length;
   const avg = r.length > 0 ? (r.reduce((a, x) => a + x.shots.length, 0) / r.length).toFixed(1) : 0;
+  const setWins = m.sets.filter((s) => s.sonScore > s.oppScore).length;
+  const won = setWins > m.sets.length / 2;
 
   return (
     <Screen>
       <TopBar title="Match summary" onBack={() => setScreen("home")} />
-      <div style={{ background: "#1B5E20", borderRadius: 14, padding: "10px 16px", marginBottom: 12, textAlign: "center" }}>
-        <div style={{ fontSize: 12, color: "#a5d6a7" }}>{m.id} · vs {m.opponent}</div>
-        <div>{m.sets.map((s, i) => <span key={i} style={{ fontSize: 20, fontWeight: 700, color: "#fff", margin: "0 8px" }}>{s.sonScore}-{s.oppScore}</span>)}</div>
-      </div>
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8, marginBottom: 10 }}>
+
+      <Card tone={won ? "accent" : "danger"} className="mb-3 text-center">
+        <div className="text-[10px] uppercase tracking-wider text-neutral-400 font-semibold mb-1">
+          {m.id} · vs {m.opponent}
+        </div>
+        <div className="flex justify-center gap-5 my-2">
+          {m.sets.map((s, i) => (
+            <div key={i} className="text-center">
+              <div className="text-[9px] uppercase text-neutral-500 tracking-wider">S{i + 1}</div>
+              <div className={`text-2xl font-extrabold font-display tabular-nums ${s.sonScore > s.oppScore ? "text-emerald-400" : "text-red-400"}`}>
+                {s.sonScore}-{s.oppScore}
+              </div>
+            </div>
+          ))}
+        </div>
+        <div className={`text-sm font-bold uppercase tracking-widest ${won ? "text-emerald-400" : "text-red-400"}`}>
+          {won ? "Match won" : "Match lost"}
+        </div>
+      </Card>
+
+      <div className="grid grid-cols-3 gap-2 mb-2">
         <Stat label="Rallies" value={r.length} />
-        <Stat label="Won" value={w} color="#4caf50" />
-        <Stat label="Lost" value={l} color="#ef5350" />
+        <Stat label="Won" value={w} tone="good" />
+        <Stat label="Lost" value={l} tone="bad" />
       </div>
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8, marginBottom: 10 }}>
-        <Stat label="Winners" value={wn} color="#1B5E20" />
-        <Stat label="Unforced Err" value={ue} color="#c62828" />
+      <div className="grid grid-cols-3 gap-2 mb-2">
+        <Stat label="Winners" value={wn} tone="good" />
+        <Stat label="UE" value={ue} tone="bad" />
         <Stat label="Avg rally" value={avg} />
       </div>
       {cl.length > 0 && (
-        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 10 }}>
-          <Stat label="Clutch pts" value={cl.length} />
-          <Stat label="Clutch won" value={`${cw}/${cl.length}`} color={cw >= cl.length / 2 ? "#4caf50" : "#ef5350"} />
+        <div className="grid grid-cols-2 gap-2 mb-2">
+          <Stat label="Clutch pts" value={cl.length} tone="warn" />
+          <Stat label="Clutch won" value={`${cw}/${cl.length}`} tone={cw >= cl.length / 2 ? "good" : "bad"} />
         </div>
       )}
-      <BigBtn bg="#e3f2fd" color="#0d47a1" onClick={() => setScreen("home")}>Done</BigBtn>
+
+      <div className="mt-4">
+        <BigBtn tone="violet" onClick={() => setScreen("patterns")}>See tactical patterns →</BigBtn>
+        <BigBtn tone="secondary" onClick={() => setScreen("home")}>Back to home</BigBtn>
+      </div>
     </Screen>
   );
 }
