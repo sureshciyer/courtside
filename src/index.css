@@ -11,8 +11,14 @@ body {
   -webkit-font-smoothing: antialiased;
 }
 
+body:has(.capture-dark) { background: #0a0a0a; }
+
 @keyframes cs-fade-in {
   from { opacity: 0; transform: translateX(-50%) translateY(-8px); }
   to   { opacity: 1; transform: translateX(-50%) translateY(0); }
 }
 .cs-toast { animation: cs-fade-in 0.2s ease; }
+
+/* Hide horizontal scrollbar chrome on the timeline while keeping scroll. */
+.no-scrollbar::-webkit-scrollbar { display: none; }
+.no-scrollbar { scrollbar-width: none; -ms-overflow-style: none; }

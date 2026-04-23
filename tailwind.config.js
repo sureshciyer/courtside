@@ -1,21 +1,26 @@
 /** @type {import('tailwindcss').Config} */
 export default {
   content: ["./index.html", "./src/**/*.{js,jsx}"],
-  darkMode: "class",
   theme: {
     extend: {
       fontFamily: {
-        display: ["Outfit", "sans-serif"],
-        mono: ["JetBrains Mono", "monospace"],
+        display: ["Outfit", "system-ui", "sans-serif"],
+        mono: ["JetBrains Mono", "ui-monospace", "monospace"],
       },
-      colors: {
-        court: { DEFAULT: "#1B5E20", light: "#E8F5E9", ink: "#0b3b11" },
-        role: {
-          "opening-bg": "#e3f2fd", "opening-fg": "#0d47a1",
-          "disruption-bg": "#fff3e0", "disruption-fg": "#e65100",
-          "finish-bg": "#ffebee", "finish-fg": "#b71c1c",
-          "neutral-bg": "#f5f5f5", "neutral-fg": "#78909c",
+      boxShadow: {
+        "disruption-glow":
+          "0 0 0 1.5px rgba(245,158,11,0.85), 0 0 14px rgba(245,158,11,0.45)",
+        "focus-glow":
+          "0 0 0 2px rgba(52,211,153,0.9), 0 0 16px rgba(52,211,153,0.35)",
+      },
+      keyframes: {
+        "pulse-arm": {
+          "0%, 100%": { boxShadow: "0 0 0 0 rgba(52,211,153,0.5)" },
+          "50%": { boxShadow: "0 0 0 6px rgba(52,211,153,0)" },
         },
+      },
+      animation: {
+        "pulse-arm": "pulse-arm 1.4s ease-in-out infinite",
       },
     },
   },
