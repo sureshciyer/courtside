@@ -59,6 +59,7 @@ export default function Summary({ setScreen }) {
 
       <div className="mt-4">
         <BigBtn tone="violet" onClick={() => setScreen("patterns")}>See tactical patterns →</BigBtn>
+        <BigBtn tone="accent" onClick={() => setScreen("report")}>Full performance report →</BigBtn>
         <BigBtn tone="secondary" onClick={() => setScreen("home")}>Back to home</BigBtn>
       </div>
     </Screen>

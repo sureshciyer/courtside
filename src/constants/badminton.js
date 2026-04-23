@@ -63,3 +63,31 @@ export const DISRUPTION_SHOTS = new Set(["SM", "HS", "KL", "NT"]);
 
 // Shots that usually end a rally (auto-suggest the "finish" role).
 export const FINISH_SHOTS = new Set(["SM", "KL"]);
+
+// Human-readable shot names, used in reports / dashboards.
+export const SHOT_NAMES = {
+  SM: "Smash",
+  HS: "Half-Smash",
+  DR: "Drop",
+  SL: "Slice",
+  CL: "Clear",
+  DV: "Drive",
+  PS: "Push",
+  LF: "Lift",
+  BL: "Block",
+  NT: "Net Shot",
+  KL: "Net Kill",
+  LB: "Lob",
+  LS: "Low Serve",
+  FS: "Flick Serve",
+  DS: "Drive Serve",
+};
+
+export const ZONE_LABELS = {
+  1: "Front L", 2: "T-Junc", 3: "Front R",
+  4: "Mid L",   5: "Body",   6: "Mid R",
+  7: "Back L",  8: "Back C", 9: "Back R",
+};
+
+// The report is personalised to this player by default; user can rename later.
+export const PLAYER_NAME = "Arjun";

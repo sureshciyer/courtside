@@ -20,3 +20,44 @@ body {
 /* Hide horizontal scrollbar chrome on the timeline while keeping scroll. */
 .no-scrollbar::-webkit-scrollbar { display: none; }
 .no-scrollbar { scrollbar-width: none; -ms-overflow-style: none; }
+
+/* ---------- Print / PDF export styles (Report screen) ---------- */
+@media print {
+  @page { size: A4; margin: 14mm 12mm; }
+
+  html, body {
+    background: #ffffff !important;
+    color: #111 !important;
+    font-size: 10.5pt;
+  }
+
+  /* Hide any UI that doesn't belong in the PDF. */
+  button, .print\:hidden { display: none !important; }
+
+  /* Ensure emoji / icon buttons inside the header don't leave empty space. */
+  header, nav { display: none !important; }
+
+  /* The Report wrapper removes its outer dark chrome on print. */
+  .report-root, .report-root * {
+    background: transparent !important;
+    color: #111 !important;
+    box-shadow: none !important;
+  }
+
+  /* Keep charts & tables together across page breaks when possible. */
+  table, .print\:break-inside-avoid { break-inside: avoid; }
+
+  h1, h2, h3 { break-after: avoid; }
+
+  /* Utility hooks used by the Report markup. */
+  .print\:break-before-page { break-before: page; }
+  .print\:break-after-page  { break-after:  page; }
+
+  /* Dark-themed borders get washed-out on paper — force neutral grays. */
+  .report-root [class*="border-neutral-8"],
+  .report-root [class*="border-emerald-8"],
+  .report-root [class*="border-emerald-9"] {
+    border-color: #9ca3af !important;
+  }
+}
+
