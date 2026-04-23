@@ -16,6 +16,7 @@ import ShotPalette from "../components/capture/ShotPalette.jsx";
 import QualityToggle from "../components/capture/QualityToggle.jsx";
 import ServerPicker from "../components/capture/ServerPicker.jsx";
 import ResultBar from "../components/capture/ResultBar.jsx";
+import RallyLogSheet from "../components/capture/RallyLogSheet.jsx";
 
 const SERVE_CODES = new Set(SHOT_CODES.serve.map((s) => s.code));
 
@@ -43,6 +44,7 @@ export default function Capture({ setScreen }) {
   const [finishAfter, setFinishAfter] = useState(false);
   const [showResult, setShowResult] = useState(false);
   const [pendingResult, setPendingResult] = useState(null);
+  const [showLog, setShowLog] = useState(false);
   const [toast, setToast] = useState(null);
 
   useEffect(() => { if (!m) setScreen("home"); }, [m, setScreen]);
@@ -239,6 +241,18 @@ export default function Capture({ setScreen }) {
             <QualityToggle value={quality} onChange={handleQualityChange} />
             <div className="flex items-center gap-2">
               <button
+                onClick={() => setShowLog(true)}
+                className="px-2 py-1.5 rounded-md bg-neutral-900 border border-neutral-700 text-neutral-300 text-[11px] font-semibold hover:bg-neutral-800 active:scale-95"
+                title="Review finished rallies in this set"
+              >
+                📋 Log
+                {m.rallies.filter((r) => r.set === m.currentSet + 1).length > 0 && (
+                  <span className="ml-1 font-mono text-emerald-400">
+                    {m.rallies.filter((r) => r.set === m.currentSet + 1).length}
+                  </span>
+                )}
+              </button>
+              <button
                 onClick={() => setFinishAfter((v) => !v)}
                 className={`px-2 py-1.5 rounded-md border text-[11px] font-semibold transition ${finishAfter ? "bg-red-600 border-red-400 text-white animate-pulse-arm" : "bg-neutral-900 border-neutral-700 text-neutral-400 hover:bg-neutral-800"}`}
                 title="Next commit ends the rally"
@@ -299,6 +313,14 @@ export default function Capture({ setScreen }) {
           onPickResult={setPendingResult}
           onFinish={handleFinish}
           onCancel={() => { setShowResult(false); setPendingResult(null); }}
+        />
+      )}
+
+      {showLog && (
+        <RallyLogSheet
+          rallies={m.rallies}
+          currentSet={m.currentSet + 1}
+          onClose={() => setShowLog(false)}
         />
       )}
     </div>
