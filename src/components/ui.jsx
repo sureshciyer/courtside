@@ -171,14 +171,19 @@ const HEAT_RAMP = {
 };
 
 export function HeatGrid({ values, tone = "red", maxOverride }) {
-  const max = Math.max(1, maxOverride || Math.max(...values));
+  // Accept either a 10-slot array (Patterns: effectivenessZones / criticalReturn)
+  // or a plain { zoneN: count } object (Scouting / Report: zoneTallies).
+  // Spreading a plain object into Math.max throws "object is not iterable".
+  const vals = Array.isArray(values) ? values : Object.values(values || {});
+  const max = Math.max(1, maxOverride || Math.max(0, ...vals));
   const paint = HEAT_RAMP[tone] || HEAT_RAMP.red;
+  const read = (n) => (values ? (values[n] || 0) : 0);
   return (
     <div className="flex flex-col gap-1.5">
       <div className="text-[9px] uppercase tracking-[0.2em] text-neutral-500 text-center">↑ NET ↑</div>
       <div className="grid grid-cols-3 gap-1.5">
         {ZONES.map((z) => {
-          const c = values[z.n] || 0;
+          const c = read(z.n);
           const alpha = c / max;
           const bg = c === 0 ? "transparent" : paint(alpha);
           return (
