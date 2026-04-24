@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useMatchStore } from "../store/useMatchStore.js";
 import { Screen, TopBar, Card, Field, SectionLabel } from "../components/ui.jsx";
-import { debugLog } from "../lib/debugLog.js";
+import { debugLog, relativeTime } from "../lib/debugLog.js";
 
 // Simple preferences screen. Every change writes back to the Zustand store
 // immediately (no "Save" button) — the `persist` middleware handles storage.
@@ -88,6 +88,7 @@ function DebugPanel() {
   const [entries, setEntries] = useState(() => debugLog.get());
   const [verbose, setVerbose] = useState(debugLog.isEnabled());
   const [copied, setCopied] = useState(false);
+  const syncStatus = useMatchStore((s) => s.syncStatus) || {};
 
   useEffect(() => {
     const unsub = debugLog.subscribe(() => setEntries(debugLog.get()));
@@ -137,6 +138,38 @@ function DebugPanel() {
         {errorCount > 0 && (
           <span className="ml-2 text-red-400 font-semibold">· {errorCount} error{errorCount !== 1 ? "s" : ""}</span>
         )}
+      </div>
+
+      {/* Sync status — persisted across reloads, unlike the event log */}
+      <div className="bg-neutral-950 border border-neutral-800 rounded p-2 mb-2 text-[11px] font-mono leading-relaxed">
+        <div className="flex items-center justify-between">
+          <span className="text-neutral-500">⬇ Last backup</span>
+          <span className="text-neutral-200">
+            {syncStatus.lastBackupAt ? (
+              <>
+                {relativeTime(syncStatus.lastBackupAt)}
+                <span className="text-neutral-500"> · {syncStatus.lastBackupMatchCount || 0}m</span>
+              </>
+            ) : (
+              <span className="text-neutral-500">never</span>
+            )}
+          </span>
+        </div>
+        <div className="flex items-center justify-between">
+          <span className="text-neutral-500">📥 Last restore</span>
+          <span className="text-neutral-200">
+            {syncStatus.lastRestoreAt ? (
+              <>
+                {relativeTime(syncStatus.lastRestoreAt)}
+                {syncStatus.lastRestoreStats && (
+                  <span className="text-neutral-500"> · +{syncStatus.lastRestoreStats.addedMatches || 0}m</span>
+                )}
+              </>
+            ) : (
+              <span className="text-neutral-500">never</span>
+            )}
+          </span>
+        </div>
       </div>
 
       <div className="max-h-48 overflow-y-auto bg-neutral-950 border border-neutral-800 rounded p-2">

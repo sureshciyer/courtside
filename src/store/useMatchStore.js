@@ -79,6 +79,15 @@ export const useMatchStore = create(
       // time — not stored here — so they always reflect current data.
       opponents: {},
 
+      // Persisted backup/restore activity log so "when did I last sync"
+      // survives refresh. Not chatty — two timestamps + one stats blob.
+      syncStatus: {
+        lastBackupAt: null,
+        lastBackupMatchCount: 0,
+        lastRestoreAt: null,
+        lastRestoreStats: null,
+      },
+
       settings: {
         playerName: "Arjun",
         handedness: "R",
@@ -450,7 +459,27 @@ export const useMatchStore = create(
       // Merge a backup envelope into current state without destroying local
       // work. Matches / paused matches dedupe by id; opponent profiles
       // profile-wise merge so existing local notes/AI insights win.
-      applyBackupMerge: (mergedPatch) => set(mergedPatch),
+      // `stats` is optional — when provided it updates syncStatus.
+      applyBackupMerge: (mergedPatch, stats = null) =>
+        set((state) => ({
+          ...mergedPatch,
+          syncStatus: {
+            ...state.syncStatus,
+            lastRestoreAt: Date.now(),
+            lastRestoreStats: stats,
+          },
+        })),
+
+      // Called after a successful download — sets the last-backup marker
+      // so the Backup/Restore screen and Debug panel can show "X h ago".
+      recordBackupDownload: (matchCount) =>
+        set((state) => ({
+          syncStatus: {
+            ...state.syncStatus,
+            lastBackupAt: Date.now(),
+            lastBackupMatchCount: matchCount ?? (state.matches?.length || 0),
+          },
+        })),
 
       currentSet: () => {
         const m = get().currentMatch;
@@ -475,6 +504,7 @@ export const useMatchStore = create(
         matchCounter: state.matchCounter,
         opponents: state.opponents,
         settings: state.settings,
+        syncStatus: state.syncStatus,
       }),
       // Incremental migrations. Keep the chain additive so older snapshots
       // can walk through every step.
@@ -524,6 +554,7 @@ export const useMatchStore = create(
         settings: { ...current.settings, ...(persisted?.settings || {}) },
         pausedMatches: persisted?.pausedMatches || current.pausedMatches || [],
         opponents: { ...(current.opponents || {}), ...(persisted?.opponents || {}) },
+        syncStatus: { ...(current.syncStatus || {}), ...(persisted?.syncStatus || {}) },
       }),
     }
   )

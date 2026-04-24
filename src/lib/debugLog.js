@@ -67,6 +67,21 @@ export const debugLog = {
   isEnabled() { return enabled; },
 };
 
+// Tiny "X ago" formatter shared by any surface that shows timestamps.
+export const relativeTime = (ts) => {
+  if (!ts) return "never";
+  const diff = Date.now() - ts;
+  if (diff < 0) return "just now";
+  const s = Math.round(diff / 1000);
+  if (s < 45) return "just now";
+  if (s < 3600) return `${Math.round(s / 60)}m ago`;
+  if (s < 86400) return `${Math.round(s / 3600)}h ago`;
+  const days = Math.round(s / 86400);
+  if (days < 30) return `${days}d ago`;
+  const months = Math.round(days / 30);
+  return `${months}mo ago`;
+};
+
 // Install once at boot. Wraps window-level error channels so anything that
 // escapes React still lands in the buffer.
 let installed = false;

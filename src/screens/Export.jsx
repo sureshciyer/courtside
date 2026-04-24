@@ -2,7 +2,7 @@ import { useRef, useState } from "react";
 import { useMatchStore } from "../store/useMatchStore.js";
 import { Screen, TopBar, BigBtn, Card, SectionLabel } from "../components/ui.jsx";
 import { makeBackup, parseBackup, mergeBackup, BACKUP_VERSION } from "../lib/backup.js";
-import { debugLog } from "../lib/debugLog.js";
+import { debugLog, relativeTime } from "../lib/debugLog.js";
 
 // Backup / Restore hub. Three sections:
 //   1. Backup       — full JSON envelope download (safe restore target)
@@ -15,7 +15,9 @@ export default function Export({ setScreen }) {
   const opponents = useMatchStore((s) => s.opponents) || {};
   const matchCounter = useMatchStore((s) => s.matchCounter) || 0;
   const settings = useMatchStore((s) => s.settings);
+  const syncStatus = useMatchStore((s) => s.syncStatus) || {};
   const applyBackupMerge = useMatchStore((s) => s.applyBackupMerge);
+  const recordBackupDownload = useMatchStore((s) => s.recordBackupDownload);
 
   const totalRallies = matches.reduce((a, m) => a + m.rallies.length, 0);
   const opponentCount = Object.keys(opponents).length;
@@ -35,6 +37,7 @@ export default function Export({ setScreen }) {
     a.click();
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
+    recordBackupDownload(matches.length);
     debugLog.info("export", "backup downloaded", { filename, matches: matches.length });
   };
 
@@ -79,7 +82,7 @@ export default function Export({ setScreen }) {
     if (!importState.incoming) return;
     const current = { matches, pausedMatches, opponents, matchCounter };
     const { patch, stats } = mergeBackup(current, importState.incoming);
-    applyBackupMerge(patch);
+    applyBackupMerge(patch, stats);
     setImportState({ phase: "done", preview: stats, incoming: null, error: null, warning: null });
     debugLog.info("import", "backup merged", stats);
   };
@@ -103,12 +106,24 @@ export default function Export({ setScreen }) {
     }
   };
 
+  const needsFirstBackup = matches.length >= 5 && !syncStatus.lastBackupAt;
+  const backupBehindByMatches = syncStatus.lastBackupAt
+    ? Math.max(0, matches.length - (syncStatus.lastBackupMatchCount || 0))
+    : 0;
+
   return (
     <Screen>
       <TopBar
         title="Backup / Restore"
         subtitle={`${matches.length} match${matches.length !== 1 ? "es" : ""} · ${totalRallies} rallies · ${opponentCount} opponents`}
         onBack={() => setScreen("home")}
+      />
+
+      {/* ==================== SYNC STATUS ==================== */}
+      <SyncStatusCard
+        status={syncStatus}
+        needsFirstBackup={needsFirstBackup}
+        behindByMatches={backupBehindByMatches}
       />
 
       {/* ==================== BACKUP ==================== */}
@@ -243,5 +258,51 @@ function PreviewRow({ label, value, tone = "default" }) {
       <span className="text-neutral-400">{label}</span>
       <span className={`font-mono font-bold tabular-nums ${tones[tone]}`}>{value}</span>
     </div>
+  );
+}
+
+function SyncStatusCard({ status, needsFirstBackup, behindByMatches }) {
+  const urgent = needsFirstBackup || behindByMatches >= 5;
+  return (
+    <Card tone={urgent ? "warn" : "default"} className="mb-3">
+      <SectionLabel>🔄 Sync status</SectionLabel>
+      <div className="grid grid-cols-[auto,1fr] gap-x-3 gap-y-1 text-[12px]">
+        <span className="text-neutral-500">⬇ Last backup</span>
+        <span className="font-mono text-neutral-200">
+          {status.lastBackupAt ? (
+            <>
+              {relativeTime(status.lastBackupAt)}
+              <span className="text-neutral-500"> · {status.lastBackupMatchCount} match{status.lastBackupMatchCount !== 1 ? "es" : ""}</span>
+            </>
+          ) : (
+            <span className="text-neutral-500">never</span>
+          )}
+        </span>
+
+        <span className="text-neutral-500">📥 Last restore</span>
+        <span className="font-mono text-neutral-200">
+          {status.lastRestoreAt ? (
+            <>
+              {relativeTime(status.lastRestoreAt)}
+              {status.lastRestoreStats && (
+                <span className="text-neutral-500"> · +{status.lastRestoreStats.addedMatches} matches</span>
+              )}
+            </>
+          ) : (
+            <span className="text-neutral-500">never</span>
+          )}
+        </span>
+      </div>
+      {needsFirstBackup && (
+        <div className="mt-2 p-2 rounded bg-amber-950/40 border border-amber-800 text-[11px] text-amber-200 leading-relaxed">
+          ⚠️ You have match data but have never downloaded a backup. If you clear browser data or switch devices, everything is lost.
+        </div>
+      )}
+      {!needsFirstBackup && behindByMatches >= 5 && (
+        <div className="mt-2 p-2 rounded bg-amber-950/40 border border-amber-800 text-[11px] text-amber-200 leading-relaxed">
+          ⚠️ {behindByMatches} new match{behindByMatches !== 1 ? "es" : ""} captured since your last backup. Consider downloading again.
+        </div>
+      )}
+    </Card>
   );
 }
