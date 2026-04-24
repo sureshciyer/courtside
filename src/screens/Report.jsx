@@ -38,7 +38,7 @@ export default function Report({ setScreen }) {
 
   const { agg, style, tournaments, distribution, lengthProfile, serveReturn,
           clutch, fatigue, deception, effectiveness,
-          winnerZones, errorZonesAll, allZones, recs, rallies } = bundle;
+          winnerZones, errorZonesAll, allZones, recs, rallies, advanced } = bundle;
   const wonMatches = matches.filter((m) => {
     const setsWon = m.sets.filter((s) => s.sonScore > s.oppScore).length;
     return setsWon > m.sets.length / 2;
@@ -80,7 +80,8 @@ export default function Report({ setScreen }) {
             ["a7", "7. Fatigue & endurance"],
             ["a8", "8. Effectiveness index"],
             ["a9", "9. Predictability & deception"],
-            ["a10", "10. Coaching recommendations"],
+            ["a10", "10. Tactical cleverness"],
+            ["a11", "11. Coaching recommendations"],
           ]} onNav={scrollTo} />
           <TocSection label="Part B: Drill-down" items={[
             ...tournaments.map((t, i) => ["t" + i, t.name]),
@@ -311,8 +312,31 @@ export default function Report({ setScreen }) {
         </Flag>
       )}
 
-      {/* 10. Coaching recommendations */}
-      <SH id="a10" n="10" t="Coaching recommendations" />
+      {/* 10. Tactical cleverness — contextual pro-level insights */}
+      <SH id="a10" n="10" t="Tactical cleverness" />
+      <p className="text-xs text-neutral-400 mb-3">
+        Pro-level contextual analytics: how much you move the opponent, which
+        shot unlocks your winners, whether your serves decay under pressure,
+        where the opponent finishes you off, and when your momentum collapses.
+      </p>
+
+      <SubSH t="Displacement Index (opponent movement)" />
+      <DisplacementViz data={advanced.displacement} />
+
+      <SubSH t="Kill Chain (setup → winner)" />
+      <KillChainList data={advanced.killChains} />
+
+      <SubSH t="Serve ROI (LS / FS / DS · early vs late)" />
+      <ServeROITable data={advanced.serveROI} />
+
+      <SubSH t="Recovery Leak (where opp finishes after your shot)" />
+      <RecoveryLeakView data={advanced.recoveryLeak} />
+
+      <SubSH t="Momentum chunks (loss streaks of 3+)" />
+      <MomentumChunksView data={advanced.momentum} />
+
+      {/* 11. Coaching recommendations */}
+      <SH id="a11" n="11" t="Coaching recommendations" />
       {recs.length === 0 ? (
         <Empty>Not enough data to generate recommendations yet — keep capturing matches.</Empty>
       ) : (
@@ -551,6 +575,230 @@ function SH({ id, n, t }) {
       {n && <span className="text-neutral-500 font-normal mr-1">{n}.</span>}
       {t}
     </h2>
+  );
+}
+
+// Smaller sub-section header used inside section 10's "Tactical cleverness".
+function SubSH({ t }) {
+  return (
+    <h3 className="text-[11px] font-bold text-sky-300 uppercase tracking-[0.15em] mt-4 mb-2 print:text-black">
+      {t}
+    </h3>
+  );
+}
+
+// ---- Displacement Index bar ----
+function DisplacementViz({ data }) {
+  const max = Math.max(data.max, data.won, data.lost) || 1;
+  const wonPct = (data.won / max) * 100;
+  const lostPct = (data.lost / max) * 100;
+  const verdict = data.verdict === "movement-driven"
+    ? { tone: "text-emerald-300", text: `Winning by moving the opponent (Δ ${data.delta > 0 ? "+" : ""}${data.delta}).` }
+    : data.verdict === "power-driven"
+    ? { tone: "text-amber-300", text: `Winning through raw power/luck — displacement under 1.2 suggests you're finishing early, not wearing the opponent out.` }
+    : data.verdict === "balanced"
+    ? { tone: "text-sky-300", text: `Balanced approach — moderate displacement on wins.` }
+    : { tone: "text-neutral-500", text: "Need at least 3 winning rallies with recorded zones to classify." };
+
+  return (
+    <div className="bg-neutral-900 border border-neutral-800 rounded-lg p-3 print:bg-white print:border-neutral-400">
+      {data.wonRallies + data.lostRallies === 0 ? (
+        <Empty>No rallies with enough shot-zone data yet.</Empty>
+      ) : (
+        <>
+          <div className="grid grid-cols-[70px,1fr,80px] gap-x-3 gap-y-2 items-center text-[11px]">
+            <span className="text-emerald-300 font-semibold">Won rallies</span>
+            <div className="h-3 bg-neutral-800 rounded overflow-hidden print:bg-neutral-200">
+              <div className="h-full bg-emerald-500 rounded" style={{ width: `${wonPct}%` }} />
+            </div>
+            <span className="font-mono text-right tabular-nums text-emerald-300">
+              {data.won.toFixed(2)}<span className="text-neutral-500"> / {data.max.toFixed(2)}</span>
+            </span>
+
+            <span className="text-red-300 font-semibold">Lost rallies</span>
+            <div className="h-3 bg-neutral-800 rounded overflow-hidden print:bg-neutral-200">
+              <div className="h-full bg-red-500 rounded" style={{ width: `${lostPct}%` }} />
+            </div>
+            <span className="font-mono text-right tabular-nums text-red-300">
+              {data.lost.toFixed(2)}<span className="text-neutral-500"> / {data.max.toFixed(2)}</span>
+            </span>
+          </div>
+          <div className={`text-[11px] leading-relaxed mt-3 ${verdict.tone}`}>
+            <b>Verdict:</b> {verdict.text}
+            <span className="text-neutral-500 block mt-1">
+              Based on {data.wonRallies} winning ({data.wonPairs} shot pairs) and {data.lostRallies} losing rallies.
+              Thresholds: &gt; 2.0 = movement-driven · &lt; 1.2 = power-driven.
+            </span>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+// ---- Kill Chain list ----
+function KillChainList({ data }) {
+  if (data.top.length === 0) {
+    return <Empty>No Winner rallies with a setup shot captured yet.</Empty>;
+  }
+  const max = data.top[0].count;
+  return (
+    <div className="flex flex-col gap-1.5">
+      {data.top.map((row) => {
+        const widthPct = (row.count / max) * 100;
+        return (
+          <div
+            key={row.key}
+            className="flex items-center gap-3 p-2 rounded-md bg-emerald-950/30 border border-emerald-900/50 print:bg-emerald-50 print:border-emerald-300"
+          >
+            <div className="flex-1 min-w-0">
+              <div className="font-mono text-xs text-emerald-200 truncate print:text-black">
+                <span className="text-neutral-400">Setup:</span> {row.setupLabel}
+                <span className="text-neutral-500 mx-1.5">→</span>
+                <span className="text-emerald-300 font-bold">Finish: {row.winnerLabel}</span>
+              </div>
+              <div className="h-1 bg-emerald-950/60 rounded mt-1 overflow-hidden print:bg-emerald-100">
+                <div className="h-full bg-emerald-400 rounded" style={{ width: `${widthPct}%` }} />
+              </div>
+            </div>
+            <Badge tone="default">×{row.count}</Badge>
+          </div>
+        );
+      })}
+      <div className="text-[11px] text-neutral-500 mt-1">
+        {data.totalWinners} winning rall{data.totalWinners !== 1 ? "ies" : "y"} had a qualifying setup shot.
+      </div>
+    </div>
+  );
+}
+
+// ---- Serve ROI table ----
+function ServeROITable({ data }) {
+  const ROWS = [
+    { code: "LS", name: "Low Serve" },
+    { code: "FS", name: "Flick Serve" },
+    { code: "DS", name: "Drive Serve" },
+  ];
+  const hasData = ROWS.some((r) => data[r.code]?.overall?.pts > 0);
+  if (!hasData) return <Empty>No Son-served rallies captured yet.</Empty>;
+  return (
+    <div className="overflow-x-auto">
+      <table className="w-full text-[11px] border-collapse">
+        <thead>
+          <tr className="bg-neutral-800 text-neutral-300 print:bg-neutral-200 print:text-black">
+            <Th>Serve</Th>
+            <Th>Early (&lt;12)</Th>
+            <Th>Late (12–21)</Th>
+            <Th>Decay</Th>
+            <Th>Overall</Th>
+          </tr>
+        </thead>
+        <tbody>
+          {ROWS.map(({ code, name }) => {
+            const row = data[code] || { early: { pts: 0, won: 0, pct: 0 }, late: { pts: 0, won: 0, pct: 0 }, overall: { pts: 0, won: 0, pct: 0 }, decay: null };
+            const decay = row.decay;
+            const decayTone = decay === null
+              ? "text-neutral-500"
+              : decay >= 20 ? "text-red-400 font-bold"
+              : decay >= 10 ? "text-amber-400"
+              : decay <= -10 ? "text-emerald-400"
+              : "text-neutral-400";
+            return (
+              <tr key={code} className="bg-neutral-900 print:bg-white border-b border-neutral-800 print:border-neutral-400">
+                <Td>
+                  <span className="font-mono font-bold text-purple-300">{code}</span>
+                  <span className="ml-2 text-neutral-500 hidden sm:inline">{name}</span>
+                </Td>
+                <Td>{row.early.pts ? <><b>{row.early.pct}%</b> <span className="text-neutral-500">({row.early.won}/{row.early.pts})</span></> : <span className="text-neutral-600">—</span>}</Td>
+                <Td>{row.late.pts ? <><b>{row.late.pct}%</b> <span className="text-neutral-500">({row.late.won}/{row.late.pts})</span></> : <span className="text-neutral-600">—</span>}</Td>
+                <Td className={decayTone}>
+                  {decay === null ? "—" : (decay > 0 ? `↘ ${decay}pp` : decay < 0 ? `↗ ${-decay}pp` : "·")}
+                </Td>
+                <Td>{row.overall.pts ? <><b>{row.overall.pct}%</b> <span className="text-neutral-500">({row.overall.won}/{row.overall.pts})</span></> : <span className="text-neutral-600">—</span>}</Td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+      <div className="text-[11px] text-neutral-500 mt-2 leading-relaxed">
+        Decay = early% − late%. Positive (↘) = opponent solved it as the set progressed.
+        Negative (↗) = your serve gets sharper under pressure.
+      </div>
+    </div>
+  );
+}
+
+// ---- Recovery Leak ----
+function RecoveryLeakView({ data }) {
+  if (data.total === 0) return <Empty>No opponent-winner rallies yet.</Empty>;
+  return (
+    <div className="flex flex-col gap-2">
+      <div className="grid grid-cols-3 gap-2">
+        <Stat l="Opp winners" v={data.total} />
+        <Stat l="Long-diagonal" v={`${data.longDiagonalPct}%`} s={`${data.longDiagonal} of ${data.total}`} tone={data.longDiagonalPct >= 40 ? "bad" : "default"} />
+        <Stat l="Avg gap" v={data.avgDist.toFixed(2)} s={`max ${data.maxDist.toFixed(2)}`} />
+      </div>
+      <div className="flex flex-col gap-1.5 mt-2">
+        {data.top.map((p) => (
+          <div
+            key={p.key}
+            className={`flex items-center gap-3 p-2 rounded-md border ${p.dist >= 2.5 ? "bg-red-950/30 border-red-900 print:bg-red-50 print:border-red-300" : "bg-neutral-900 border-neutral-800 print:bg-white print:border-neutral-400"}`}
+          >
+            <span className="font-mono text-sm font-bold text-neutral-100 print:text-black">
+              Z{p.sonZone} <span className="text-neutral-500 mx-1">→</span> Z{p.oppZone}
+            </span>
+            <span className="flex-1 text-[11px] text-neutral-400">
+              gap {p.dist.toFixed(2)}
+              {p.dist >= 2.5 && <span className="ml-2 text-red-300 font-semibold">long diagonal</span>}
+            </span>
+            <Badge tone={p.dist >= 2.5 ? "danger" : "muted"}>×{p.count}</Badge>
+          </div>
+        ))}
+      </div>
+      <div className="text-[11px] text-neutral-500 mt-1">
+        Sequences with gap ≥ 2.5 suggest slow recovery from the corner — opponent exploits the diagonal before you re-centre.
+      </div>
+    </div>
+  );
+}
+
+// ---- Momentum chunks ----
+function MomentumChunksView({ data }) {
+  if (data.total === 0) return <Empty>No 3+ consecutive-loss streaks detected — good momentum control.</Empty>;
+  return (
+    <div className="flex flex-col gap-2">
+      <div className="grid grid-cols-3 gap-2">
+        <Stat l="Chunks (3+)" v={data.total} tone={data.total > 0 ? "bad" : "default"} />
+        <Stat l="Physical" v={data.physical} s="prev rally > 15" tone="warn" />
+        <Stat l="Mental" v={data.mental} s="prev rally ≤ 15" tone="warn" />
+      </div>
+      <div className="flex flex-col gap-1.5 mt-2">
+        {data.chunks.map((c, i) => (
+          <div
+            key={i}
+            className={`p-2.5 rounded-md border-l-4 ${c.classification === "physical" ? "bg-red-950/40 border-red-500 print:bg-red-50" : c.classification === "mental" ? "bg-amber-950/40 border-amber-500 print:bg-amber-50" : "bg-neutral-900 border-neutral-700 print:bg-white"}`}
+          >
+            <div className="flex items-center justify-between gap-2 mb-1">
+              <span className="font-mono text-xs text-neutral-300 print:text-black">
+                Set {c.set} · {c.length} consecutive losses
+                <span className="text-neutral-500 ml-2">({c.scores.join(" → ")})</span>
+              </span>
+              <span className={`text-[10px] font-bold uppercase tracking-wider ${c.classification === "physical" ? "text-red-300" : c.classification === "mental" ? "text-amber-300" : "text-neutral-500"} print:text-black`}>
+                {c.classification} collapse
+              </span>
+            </div>
+            <div className="text-[11px] text-neutral-400 print:text-black">
+              avg rally: <b className="text-neutral-200 print:text-black">{c.avgLen}</b> shots ·{" "}
+              UE rate: <b className="text-neutral-200 print:text-black">{c.ueRate}%</b> ·{" "}
+              previous rally: <b className="text-neutral-200 print:text-black">{c.prevLen}</b> shots
+            </div>
+          </div>
+        ))}
+      </div>
+      <div className="text-[11px] text-neutral-500 mt-1 leading-relaxed">
+        Physical collapses typically respond to conditioning work. Mental collapses respond to routine/focus drills and point-by-point reset habits.
+      </div>
+    </div>
   );
 }
 

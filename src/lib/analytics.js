@@ -557,5 +557,226 @@ export const reportBundle = (matches) => {
     errorZonesAll: zoneTallies(rallies, "error"),
     allZones: zoneTallies(rallies, "all"),
     recs: recommendations(matches),
+    advanced: advancedInsights(rallies),
   };
 };
+
+// ===================================================================
+//  ADVANCED / CONTEXTUAL ANALYTICS  (Tactical Cleverness section)
+// ===================================================================
+
+// (x, y) layout — x = 1/2/3 across (L/C/R), y = 1/2/3 from front to back.
+// Max diagonal distance is sqrt(8) ≈ 2.83 (zone 1 → zone 9).
+export const ZONE_XY = {
+  1: [1, 1], 2: [2, 1], 3: [3, 1],
+  4: [1, 2], 5: [2, 2], 6: [3, 2],
+  7: [1, 3], 8: [2, 3], 9: [3, 3],
+};
+export const MAX_ZONE_DIST = Math.sqrt(8);
+
+export const zoneDistance = (z1, z2) => {
+  const A = ZONE_XY[z1], B = ZONE_XY[z2];
+  if (!A || !B) return 0;
+  const dx = A[0] - B[0], dy = A[1] - B[1];
+  return Math.sqrt(dx * dx + dy * dy);
+};
+
+// ---------- 1. Displacement Index ----------
+// Average Euclidean distance between consecutive shot zones, split between
+// rallies Son won and rallies he lost. >2.0 on wins = winning through
+// movement; <1.2 = winning through raw power.
+export const displacementIndex = (rallies) => {
+  let wSum = 0, wRallies = 0, wPairs = 0;
+  let lSum = 0, lRallies = 0, lPairs = 0;
+  for (const r of rallies) {
+    if (r.shots.length < 2) continue;
+    let sum = 0, pairs = 0;
+    for (let i = 1; i < r.shots.length; i++) {
+      const a = r.shots[i - 1].zone, b = r.shots[i].zone;
+      if (!a || !b) continue;
+      sum += zoneDistance(a, b); pairs++;
+    }
+    if (pairs === 0) continue;
+    const avg = sum / pairs;
+    if (r.pointWonBy === "S") { wSum += avg; wRallies++; wPairs += pairs; }
+    else if (r.pointWonBy === "O") { lSum += avg; lRallies++; lPairs += pairs; }
+  }
+  const won = wRallies ? +(wSum / wRallies).toFixed(2) : 0;
+  const lost = lRallies ? +(lSum / lRallies).toFixed(2) : 0;
+  let verdict = "insufficient";
+  if (wRallies >= 3) {
+    if (won > 2.0) verdict = "movement-driven";
+    else if (won < 1.2) verdict = "power-driven";
+    else verdict = "balanced";
+  }
+  return {
+    won, lost,
+    wonRallies: wRallies, lostRallies: lRallies,
+    wonPairs: wPairs, lostPairs: lPairs,
+    delta: +(won - lost).toFixed(2),
+    max: +MAX_ZONE_DIST.toFixed(2),
+    verdict,
+  };
+};
+
+// ---------- 2. Kill Chain ----------
+// For rallies Son won as Winners, find the setup shot: shots[n-3] (his own
+// shot two turns before the winner, assuming perfectly alternating hits).
+// Group by "setup shotType+zone → winner shotType+zone" and sort desc.
+export const killChain = (rallies) => {
+  const counts = new Map();
+  let total = 0;
+  for (const r of rallies) {
+    if (r.result !== "W" || r.pointWonBy !== "S") continue;
+    if (r.shots.length < 3) continue;
+    const n = r.shots.length;
+    const setup = r.shots[n - 3];
+    const winner = r.shots[n - 1];
+    if (!setup?.shotType || !winner?.shotType) continue;
+    total++;
+    const setupLabel = `${setup.shotType}${setup.zone ? `·Z${setup.zone}` : ""}`;
+    const winnerLabel = `${winner.shotType}${winner.zone ? `·Z${winner.zone}` : ""}`;
+    const key = `${setupLabel} → ${winnerLabel}`;
+    const row = counts.get(key) || {
+      key, setupLabel, winnerLabel,
+      setupShot: setup.shotType, setupZone: setup.zone,
+      winnerShot: winner.shotType, winnerZone: winner.zone,
+      count: 0,
+    };
+    row.count++;
+    counts.set(key, row);
+  }
+  const top = [...counts.values()].sort((a, b) => b.count - a.count).slice(0, 8);
+  return { totalWinners: total, top };
+};
+
+// ---------- 3. Serve ROI ----------
+// Win % per Son serve type, split by early phase (both scores < 12) and
+// late phase (either score >= 12). "Decay" = early% − late%; positive values
+// suggest the opponent has figured the serve out as the set progressed.
+export const serveROI = (rallies) => {
+  const mk = () => ({ pts: 0, won: 0, pct: 0 });
+  const tab = {
+    LS: { early: mk(), late: mk() },
+    FS: { early: mk(), late: mk() },
+    DS: { early: mk(), late: mk() },
+  };
+  for (const r of rallies) {
+    if (r.server !== "S" || r.shots.length === 0) continue;
+    const serve = r.shots[0];
+    const type = serve.shotType;
+    if (!tab[type]) continue;
+    const [son, opp] = (r.score || "0-0").split("-").map(Number);
+    const phase = Math.max(son || 0, opp || 0) >= 11 ? "late" : "early";
+    const bucket = tab[type][phase];
+    bucket.pts++;
+    if (r.pointWonBy === "S") bucket.won++;
+  }
+  const out = {};
+  for (const [type, phases] of Object.entries(tab)) {
+    phases.early.pct = pct(phases.early.won, phases.early.pts);
+    phases.late.pct = pct(phases.late.won, phases.late.pts);
+    const totalPts = phases.early.pts + phases.late.pts;
+    const totalWon = phases.early.won + phases.late.won;
+    out[type] = {
+      ...phases,
+      overall: { pts: totalPts, won: totalWon, pct: pct(totalWon, totalPts) },
+      // `decay` is meaningful only when both phases have data.
+      decay: phases.early.pts >= 2 && phases.late.pts >= 2
+        ? phases.early.pct - phases.late.pct
+        : null,
+    };
+  }
+  return out;
+};
+
+// ---------- 4. Recovery Leak ----------
+// Rallies opp won as a Winner. Look at the gap between Son's last shot
+// zone (shots[n-2]) and opp's finisher zone (shots[n-1]). Large diagonals
+// (>= 2.5) mean Son was recovering to the wrong base.
+export const recoveryLeak = (rallies) => {
+  const patterns = new Map();
+  let total = 0;
+  let longDiagonal = 0;
+  const dists = [];
+  for (const r of rallies) {
+    if (r.pointWonBy !== "O" || r.result !== "W") continue;
+    if (r.shots.length < 2) continue;
+    const n = r.shots.length;
+    const sonLast = r.shots[n - 2];
+    const oppWinner = r.shots[n - 1];
+    if (!sonLast?.zone || !oppWinner?.zone) continue;
+    total++;
+    const dist = zoneDistance(sonLast.zone, oppWinner.zone);
+    dists.push(dist);
+    if (dist >= 2.5) longDiagonal++;
+    const key = `Z${sonLast.zone} → Z${oppWinner.zone}`;
+    const row = patterns.get(key) || {
+      key,
+      sonZone: sonLast.zone,
+      oppZone: oppWinner.zone,
+      dist: +dist.toFixed(2),
+      count: 0,
+    };
+    row.count++;
+    patterns.set(key, row);
+  }
+  const avgDist = dists.length ? +(dists.reduce((a, b) => a + b, 0) / dists.length).toFixed(2) : 0;
+  const top = [...patterns.values()].sort((a, b) => b.count - a.count).slice(0, 6);
+  return {
+    total,
+    longDiagonal,
+    longDiagonalPct: pct(longDiagonal, total),
+    avgDist,
+    top,
+    maxDist: +MAX_ZONE_DIST.toFixed(2),
+  };
+};
+
+// ---------- 5. Momentum Chunks ----------
+// Walk the rallies in capture order. Any run of 3+ consecutive son losses
+// is a "chunk". Preceding rally length classifies: prev > 15 shots =>
+// physical collapse (he was gassed); else mental/focus collapse.
+export const momentumChunks = (rallies) => {
+  const chunks = [];
+  let i = 0;
+  while (i < rallies.length) {
+    if (rallies[i].pointWonBy !== "O") { i++; continue; }
+    const start = i;
+    while (i < rallies.length && rallies[i].pointWonBy === "O") i++;
+    const end = i - 1;
+    const length = end - start + 1;
+    if (length < 3) continue;
+    const chunkRallies = rallies.slice(start, end + 1);
+    const avgLen = +(chunkRallies.reduce((a, r) => a + r.shots.length, 0) / chunkRallies.length).toFixed(1);
+    const ueCount = chunkRallies.filter(isSonUE).length;
+    const ueRate = pct(ueCount, chunkRallies.length);
+    const prev = start > 0 ? rallies[start - 1] : null;
+    const prevLen = prev?.shots.length || 0;
+    const classification = prevLen > 15 ? "physical" : prevLen > 0 ? "mental" : "unclassified";
+    chunks.push({
+      startIdx: start, endIdx: end, length,
+      set: chunkRallies[0].set,
+      scores: chunkRallies.map((r) => r.score),
+      avgLen, ueRate,
+      prevLen,
+      classification,
+    });
+  }
+  return {
+    chunks,
+    physical: chunks.filter((c) => c.classification === "physical").length,
+    mental: chunks.filter((c) => c.classification === "mental").length,
+    unclassified: chunks.filter((c) => c.classification === "unclassified").length,
+    total: chunks.length,
+  };
+};
+
+// One-shot bundler for the report.
+export const advancedInsights = (rallies) => ({
+  displacement: displacementIndex(rallies),
+  killChains: killChain(rallies),
+  serveROI: serveROI(rallies),
+  recoveryLeak: recoveryLeak(rallies),
+  momentum: momentumChunks(rallies),
+});
