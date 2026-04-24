@@ -780,3 +780,109 @@ export const advancedInsights = (rallies) => ({
   recoveryLeak: recoveryLeak(rallies),
   momentum: momentumChunks(rallies),
 });
+
+// ===================================================================
+//  OPPONENT / SCOUTING DERIVATIONS
+//  Pure helpers — combine the completed-matches archive with the
+//  opponent-profile map from the store (notes + AI insights) and return
+//  shapes the Scouting screen and Markdown exports can render directly.
+// ===================================================================
+
+export const normalizeOpponentKey = (name) => (name || "").trim().toLowerCase();
+
+// List every opponent we've played, most recent first. Rows carry aggregate
+// career numbers plus the profile blob (notes / aiInsights) if one exists.
+// Profiles without any matches are included too — user may register a
+// dossier before the first encounter.
+export const listOpponents = (matches, opponents = {}) => {
+  const byKey = new Map();
+  for (const m of matches) {
+    const key = normalizeOpponentKey(m.opponent);
+    if (!key) continue;
+    if (!byKey.has(key)) byKey.set(key, { key, name: m.opponent, matches: [] });
+    byKey.get(key).matches.push(m);
+  }
+  for (const [key, prof] of Object.entries(opponents || {})) {
+    if (!byKey.has(key)) byKey.set(key, { key, name: prof.name, matches: [] });
+  }
+
+  return [...byKey.values()]
+    .map((row) => {
+      const prof = opponents[row.key] || null;
+      const wins = row.matches.filter((m) => {
+        const setsWon = m.sets.filter((s) => s.sonScore > s.oppScore).length;
+        return setsWon > m.sets.length / 2;
+      }).length;
+      const rallies = row.matches.flatMap((m) => m.rallies);
+      const lastPlayed = row.matches
+        .map((m) => m.date || "")
+        .sort()
+        .reverse()[0] || null;
+      const tournaments = [...new Set(row.matches.map((m) => m.tournament).filter(Boolean))];
+      return {
+        key: row.key,
+        name: prof?.name || row.name,
+        notes: prof?.notes || "",
+        aiInsights: prof?.aiInsights || "",
+        profile: prof,
+        matchesPlayed: row.matches.length,
+        wins,
+        losses: row.matches.length - wins,
+        rallies: rallies.length,
+        lastPlayed,
+        tournaments,
+        winRate: row.matches.length > 0 ? pct(wins, row.matches.length) : 0,
+      };
+    })
+    .sort((a, b) => {
+      // Most recent first, then by name for stability.
+      const d = (b.lastPlayed || "").localeCompare(a.lastPlayed || "");
+      return d !== 0 ? d : a.name.localeCompare(b.name);
+    });
+};
+
+// Full dossier for one opponent: every match, every rally, the full
+// reportBundle of career analytics filtered to this opponent, plus the
+// raw profile fields (notes, AI insights) for Markdown / UI consumption.
+export const opponentDossier = (matches, opponentName, opponents = {}) => {
+  const key = normalizeOpponentKey(opponentName);
+  const filtered = matches.filter((m) => normalizeOpponentKey(m.opponent) === key);
+  const rallies = filtered.flatMap((m) => m.rallies);
+  const prof = opponents[key] || null;
+  const wins = filtered.filter((m) => {
+    const setsWon = m.sets.filter((s) => s.sonScore > s.oppScore).length;
+    return setsWon > m.sets.length / 2;
+  }).length;
+  return {
+    key,
+    name: prof?.name || opponentName,
+    notes: prof?.notes || "",
+    aiInsights: prof?.aiInsights || "",
+    profile: prof,
+    matches: filtered,
+    rallies,
+    matchesPlayed: filtered.length,
+    wins,
+    losses: filtered.length - wins,
+    winRate: filtered.length > 0 ? pct(wins, filtered.length) : 0,
+    tournaments: [...new Set(filtered.map((m) => m.tournament).filter(Boolean))],
+    bundle: filtered.length > 0 ? reportBundle(filtered) : null,
+  };
+};
+
+// Tournament-level grouping: unique tournament names + their match counts.
+// Used by the Report screen's future Tournament/Career toggle.
+export const listTournaments = (matches) => {
+  const map = new Map();
+  for (const m of matches) {
+    const name = (m.tournament || "").trim() || "Other";
+    if (!map.has(name)) {
+      map.set(name, { name, matches: [], firstDate: m.date, lastDate: m.date });
+    }
+    const t = map.get(name);
+    t.matches.push(m);
+    if ((m.date || "") < (t.firstDate || "")) t.firstDate = m.date;
+    if ((m.date || "") > (t.lastDate || "")) t.lastDate = m.date;
+  }
+  return [...map.values()].sort((a, b) => (b.lastDate || "").localeCompare(a.lastDate || ""));
+};

@@ -8,7 +8,12 @@ import {
 } from "../lib/rally.js";
 
 const STORE_KEY = "courtside-v1";
-const SCHEMA_VERSION = 2;
+const SCHEMA_VERSION = 3;
+
+// Opponent profile keys are normalized — lower-cased, trimmed — so "Rahul S."
+// and "rahul s." map to the same dossier. Matches keep the original display
+// name; the profile holds the canonical spelling.
+const normalizeOpponent = (name) => (name || "").trim().toLowerCase();
 
 /**
  * Shot shape (every entry in a rally's `shots` array):
@@ -68,6 +73,12 @@ export const useMatchStore = create(
       pausedMatches: [],     // in-progress matches stashed for later
       matchCounter: 0,       // monotonic — last id issued
 
+      // Opponent profiles, keyed by normalized opponent name. Profile shape:
+      //   { name, notes, aiInsights, createdAt, updatedAt }
+      // Career stats (W/L, heatmaps, etc.) are derived from `matches` at read
+      // time — not stored here — so they always reflect current data.
+      opponents: {},
+
       settings: {
         playerName: "Arjun",
         handedness: "R",
@@ -75,6 +86,61 @@ export const useMatchStore = create(
 
       updateSettings: (patch) =>
         set((state) => ({ settings: { ...state.settings, ...patch } })),
+
+      // ---------- opponent profiles ----------
+
+      // Idempotently register an opponent the first time we see their name.
+      // Called automatically by startMatch; safe to call from UI paths too.
+      ensureOpponent: (name) => {
+        const key = normalizeOpponent(name);
+        if (!key) return;
+        if (get().opponents[key]) return;
+        set((state) => ({
+          opponents: {
+            ...state.opponents,
+            [key]: {
+              name: (name || "").trim(),
+              notes: "",
+              aiInsights: "",
+              createdAt: Date.now(),
+              updatedAt: Date.now(),
+            },
+          },
+        }));
+      },
+
+      // Patch an opponent profile — { notes, aiInsights, name } etc.
+      // Creates the profile lazily if it doesn't exist yet.
+      updateOpponentProfile: (name, patch) => {
+        const key = normalizeOpponent(name);
+        if (!key) return;
+        set((state) => {
+          const existing = state.opponents[key] || {
+            name: (name || "").trim(),
+            notes: "",
+            aiInsights: "",
+            createdAt: Date.now(),
+          };
+          return {
+            opponents: {
+              ...state.opponents,
+              [key]: { ...existing, ...patch, updatedAt: Date.now() },
+            },
+          };
+        });
+      },
+
+      // Remove an opponent's profile (notes + AI insights). Does NOT touch
+      // their matches — those stay in the archive.
+      deleteOpponentProfile: (name) => {
+        const key = normalizeOpponent(name);
+        if (!key) return;
+        set((state) => {
+          const next = { ...state.opponents };
+          delete next[key];
+          return { opponents: next };
+        });
+      },
 
       // ---------- match lifecycle ----------
 
@@ -99,6 +165,9 @@ export const useMatchStore = create(
             pausedMatches: parked,
           };
         });
+        // Auto-register the opponent's dossier so notes/insights can attach
+        // even before the match ends.
+        get().ensureOpponent(setup.opponent);
       },
 
       // Park the live match without discarding data.
@@ -145,10 +214,17 @@ export const useMatchStore = create(
       endMatch: () =>
         set((state) => {
           if (!state.currentMatch) return {};
+          // Bump the opponent's profile timestamp so Scouting list sorts by
+          // recency naturally.
+          const key = normalizeOpponent(state.currentMatch.opponent);
+          const opponents = key && state.opponents[key]
+            ? { ...state.opponents, [key]: { ...state.opponents[key], updatedAt: Date.now() } }
+            : state.opponents;
           return {
             matches: [...state.matches, { ...state.currentMatch, completed: true }],
             currentMatch: null,
             currentRally: null,
+            opponents,
           };
         }),
 
@@ -360,6 +436,7 @@ export const useMatchStore = create(
           currentRally: data?.currentRally ?? null,
           pausedMatches: data?.pausedMatches ?? [],
           matchCounter: data?.matchCounter ?? (data?.matches?.length || 0),
+          opponents: data?.opponents ?? {},
         }),
 
       currentSet: () => {
@@ -383,26 +460,48 @@ export const useMatchStore = create(
         currentRally: state.currentRally,
         pausedMatches: state.pausedMatches,
         matchCounter: state.matchCounter,
+        opponents: state.opponents,
         settings: state.settings,
       }),
-      // v1 → v2 migration: backfill the fields added in v2 so existing
-      // localStorage snapshots don't read as empty.
+      // Incremental migrations. Keep the chain additive so older snapshots
+      // can walk through every step.
       migrate: (persisted, version) => {
         if (!persisted) return persisted;
         if (version < 2) {
-          // Seed matchCounter from whatever state we already have.
           const archived = persisted.matches?.length || 0;
           const live = persisted.currentMatch ? 1 : 0;
           const maxId = [...(persisted.matches || []), persisted.currentMatch]
             .filter(Boolean)
             .map((m) => parseInt((m.id || "M0").slice(1), 10) || 0)
             .reduce((a, b) => Math.max(a, b), 0);
-          return {
+          persisted = {
             ...persisted,
             schemaVersion: 2,
             pausedMatches: persisted.pausedMatches || [],
             matchCounter: Math.max(maxId, archived + live),
           };
+        }
+        if ((persisted.schemaVersion ?? version) < 3) {
+          // v2 -> v3: seed opponent profiles from every match we have.
+          const opponents = persisted.opponents || {};
+          const now = Date.now();
+          const pool = [
+            ...(persisted.matches || []),
+            ...(persisted.pausedMatches || []),
+            ...(persisted.currentMatch ? [persisted.currentMatch] : []),
+          ];
+          for (const m of pool) {
+            const key = (m?.opponent || "").trim().toLowerCase();
+            if (!key || opponents[key]) continue;
+            opponents[key] = {
+              name: m.opponent.trim(),
+              notes: "",
+              aiInsights: "",
+              createdAt: now,
+              updatedAt: now,
+            };
+          }
+          persisted = { ...persisted, schemaVersion: 3, opponents };
         }
         return persisted;
       },
@@ -411,6 +510,7 @@ export const useMatchStore = create(
         ...persisted,
         settings: { ...current.settings, ...(persisted?.settings || {}) },
         pausedMatches: persisted?.pausedMatches || current.pausedMatches || [],
+        opponents: { ...(current.opponents || {}), ...(persisted?.opponents || {}) },
       }),
     }
   )
