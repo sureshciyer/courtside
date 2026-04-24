@@ -211,6 +211,14 @@ export const useMatchStore = create(
           currentMatch: state.currentMatch ? { ...state.currentMatch, ...patch } : null,
         })),
 
+      // Update a completed match's AI insights (post-match critique paste).
+      updateMatchAiInsights: (matchId, text) =>
+        set((state) => ({
+          matches: state.matches.map((m) =>
+            m.id === matchId ? { ...m, aiInsights: text } : m
+          ),
+        })),
+
       endMatch: () =>
         set((state) => {
           if (!state.currentMatch) return {};

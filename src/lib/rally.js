@@ -19,6 +19,7 @@ export const initMatch = () => ({
   tournament: "",
   opponent: "",
   playerStyle: "Unknown", // opponent's style, for later pattern filtering
+  aiInsights: "",         // user-pasted critique from Claude / Gemini for this match
   sets: [{ sonScore: 0, oppScore: 0 }],
   currentSet: 0,
   rallies: [],
