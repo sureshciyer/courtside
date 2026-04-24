@@ -46,6 +46,7 @@ export default function Capture({ setScreen }) {
   const [showResult, setShowResult] = useState(false);
   const [pendingResult, setPendingResult] = useState(null);
   const [showLog, setShowLog] = useState(false);
+  const [gridFlipped, setGridFlipped] = useState(false); // visual-only: rotates the CourtGrid 180° for video notation when son is on the far side
   const [toast, setToast] = useState(null);
 
   useEffect(() => { if (!m) setScreen("home"); }, [m, setScreen]);
@@ -283,11 +284,27 @@ export default function Capture({ setScreen }) {
         ) : (
           <div className="grid grid-cols-2 gap-3 h-full">
             <div className="min-h-0">
+              <div className="flex items-center justify-between mb-1.5">
+                <div className="text-[10px] uppercase tracking-[0.2em] text-neutral-500 font-semibold">
+                  Zone
+                  {gridFlipped && (
+                    <span className="ml-1.5 text-amber-400 normal-case tracking-normal">· flipped</span>
+                  )}
+                </div>
+                <button
+                  onClick={() => setGridFlipped((v) => !v)}
+                  className={`px-2 py-0.5 rounded text-[10px] font-semibold border transition active:scale-95 ${gridFlipped ? "bg-amber-950/60 border-amber-700 text-amber-200" : "bg-neutral-900 border-neutral-700 text-neutral-400 hover:bg-neutral-800"}`}
+                  title="Rotate the grid 180° — use when son is on the far side of your camera view"
+                >
+                  ⇅ Flip
+                </button>
+              </div>
               <CourtGrid
                 onTap={handleZoneTap}
                 active={isEditing ? focused.zone : null}
                 armed={!!armedShot && !isEditing}
                 editing={isEditing}
+                flipped={gridFlipped}
               />
             </div>
             <div className="min-h-0 flex flex-col">

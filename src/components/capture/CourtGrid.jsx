@@ -3,12 +3,21 @@ import { ZONES } from "../../constants/badminton.js";
 // Split-screen court grid. Bigger, tap-friendly, dark-themed. If `armed` is
 // true (a shot type is armed and waiting for a zone), cells pulse subtly to
 // show that the next tap will commit the shot.
-export default function CourtGrid({ onTap, active, armed, editing }) {
+//
+// `flipped` rotates the visual layout 180° so the grid matches what the
+// notator sees on video when son is on the far side of the camera view.
+// The zone number saved on tap is unchanged — zones always stay in son's
+// frame of reference (Zone 1 = front-left from son's POV, regardless of
+// which end of the court he's physically on).
+export default function CourtGrid({ onTap, active, armed, editing, flipped = false }) {
+  const zones = flipped ? [...ZONES].reverse() : ZONES;
+  const topLabel    = flipped ? "BASELINE" : "↑ NET ↑";
+  const bottomLabel = flipped ? "↓ NET ↓"  : "BASELINE";
   return (
     <div className="flex flex-col gap-1.5">
-      <div className="text-[10px] uppercase tracking-[0.2em] text-neutral-500 text-center">↑ NET ↑</div>
+      <div className="text-[10px] uppercase tracking-[0.2em] text-neutral-500 text-center">{topLabel}</div>
       <div className="grid grid-cols-3 gap-1.5">
-        {ZONES.map((z) => {
+        {zones.map((z) => {
           const isActive = active === z.n;
           const base = "rounded-lg p-2 flex flex-col items-center justify-center transition active:scale-95 select-none";
           const state = isActive
@@ -30,7 +39,7 @@ export default function CourtGrid({ onTap, active, armed, editing }) {
           );
         })}
       </div>
-      <div className="text-[10px] uppercase tracking-[0.2em] text-neutral-600 text-center">BASELINE</div>
+      <div className="text-[10px] uppercase tracking-[0.2em] text-neutral-600 text-center">{bottomLabel}</div>
     </div>
   );
 }
