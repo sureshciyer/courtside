@@ -531,6 +531,64 @@ export const recommendations = (matches) => {
     });
   }
 
+  // ---- Advanced-signal triggers (driven by the Tactical Cleverness engine) ----
+  const sroi = serveROI(rallies);
+
+  // Drive Serve (DS) decay — if it drops hard late, switch after point 11.
+  const ds = sroi.DS;
+  if (ds.decay !== null && ds.decay > 20 && ds.late.pts >= 2) {
+    recs.push({
+      priority: 6,
+      tone: "warn",
+      title: "Serve ROI: swap away from Drive Serve after 11",
+      body: `Drive Serve win rate ${ds.early.pct}% early → ${ds.late.pct}% late (Δ ${ds.decay}pp). Opponents adapt once they've seen it. Open with DS for surprise, then rotate to LS after point 11.`,
+    });
+  }
+
+  // Any serve with heavy late decay → generic mix-up reco.
+  const worstDecayServe = ["LS", "FS", "DS"]
+    .map((c) => ({ code: c, ...sroi[c] }))
+    .filter((s) => s.decay !== null && s.decay >= 25 && s.late.pts >= 2)
+    .sort((a, b) => b.decay - a.decay)[0];
+  if (worstDecayServe && worstDecayServe.code !== "DS") {
+    recs.push({
+      priority: 6,
+      tone: "warn",
+      title: `Serve ROI: ${worstDecayServe.code} loses bite late`,
+      body: `${worstDecayServe.code} win rate ${worstDecayServe.early.pct}% → ${worstDecayServe.late.pct}% (Δ ${worstDecayServe.decay}pp). Mix in another serve type once the opponent has seen it ~5 times.`,
+    });
+  }
+
+  // Recovery Leak — long-diagonal finish patterns.
+  const leak = recoveryLeak(rallies);
+  if (leak.total >= 4 && leak.avgDist >= 2.5) {
+    recs.push({
+      priority: 7,
+      tone: "info",
+      title: "Recovery: faster return to base after corner shots",
+      body: `Avg recovery gap is ${leak.avgDist} zones (${leak.longDiagonalPct}% long diagonals). Opp is exploiting the corner you just vacated. Drill the split-step + cross-court recovery routine.`,
+    });
+  }
+
+  // Momentum chunks — physical vs mental collapse remediation.
+  const mom = momentumChunks(rallies);
+  if (mom.physical >= 1) {
+    recs.push({
+      priority: 8,
+      tone: "danger",
+      title: `Physical collapse detected ×${mom.physical}`,
+      body: `You lost 3+ consecutive points after rallies longer than 15 shots. Insert a reset shot — high defensive clear to the back corner — immediately after any rally > 15 shots to lower heart rate before the next point.`,
+    });
+  }
+  if (mom.mental >= 2) {
+    recs.push({
+      priority: 9,
+      tone: "warn",
+      title: `Mental collapse cluster ×${mom.mental}`,
+      body: `${mom.mental} collapse clusters after short rallies — focus issue, not fatigue. Build a point-by-point reset routine: breathe, bounce the shuttle twice, look at the back line, then serve.`,
+    });
+  }
+
   return recs.sort((a, b) => a.priority - b.priority);
 };
 

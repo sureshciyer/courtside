@@ -130,6 +130,9 @@ export default function Home({ setScreen }) {
           <BigBtn tone="violet" onClick={() => setScreen("patterns")}>
             Patterns & tactical intelligence
           </BigBtn>
+          <BigBtn tone="info" onClick={() => setScreen("scouting")}>
+            🎯 Scouting dossier
+          </BigBtn>
           <BigBtn tone="accent" onClick={() => setScreen("report")}>
             Full performance report
           </BigBtn>

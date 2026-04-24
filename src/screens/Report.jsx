@@ -1,6 +1,6 @@
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { useMatchStore } from "../store/useMatchStore.js";
-import { reportBundle, matchSummary, classifyStyle, setAggregate, pct } from "../lib/analytics.js";
+import { reportBundle, matchSummary, classifyStyle, setAggregate, pct, listTournaments } from "../lib/analytics.js";
 import { SHOT_NAMES, ZONE_LABELS } from "../constants/badminton.js";
 import { Screen, TopBar, Card, BigBtn } from "../components/ui.jsx";
 
@@ -10,8 +10,28 @@ import { Screen, TopBar, Card, BigBtn } from "../components/ui.jsx";
 // cards lose shadows/borders to render cleanly to a single PDF.
 
 export default function Report({ setScreen }) {
-  const matches = useMatchStore((s) => s.matches);
+  const allMatches = useMatchStore((s) => s.matches);
   const playerName = useMatchStore((s) => s.settings?.playerName) || "Player";
+
+  // Scope selector: "career" (all matches), "match" (one selected), or a
+  // tournament key. Defaults to career.
+  const [scope, setScope] = useState("career");
+
+  const allTournaments = useMemo(() => listTournaments(allMatches), [allMatches]);
+
+  const matches = useMemo(() => {
+    if (scope === "career") return allMatches;
+    if (scope.startsWith("match:")) {
+      const id = scope.slice(6);
+      return allMatches.filter((m) => m.id === id);
+    }
+    if (scope.startsWith("tour:")) {
+      const name = scope.slice(5);
+      return allMatches.filter((m) => (m.tournament || "Other") === name);
+    }
+    return allMatches;
+  }, [allMatches, scope]);
+
   const bundle = useMemo(() => reportBundle(matches), [matches]);
 
   const scrollTo = (id) => {
@@ -20,7 +40,7 @@ export default function Report({ setScreen }) {
 
   const printReport = () => window.print();
 
-  if (matches.length === 0) {
+  if (allMatches.length === 0) {
     return (
       <Screen>
         <TopBar title="Performance report" onBack={() => setScreen("home")} />
@@ -36,6 +56,15 @@ export default function Report({ setScreen }) {
     );
   }
 
+  // Scope label used in the header + subtitle.
+  const scopeLabel = scope === "career"
+    ? "Full career"
+    : scope.startsWith("tour:")
+    ? `Tournament: ${scope.slice(5)}`
+    : scope.startsWith("match:")
+    ? `Match ${scope.slice(6)}`
+    : "Full career";
+
   const { agg, style, tournaments, distribution, lengthProfile, serveReturn,
           clutch, fatigue, deception, effectiveness,
           winnerZones, errorZonesAll, allZones, recs, rallies, advanced } = bundle;
@@ -48,10 +77,47 @@ export default function Report({ setScreen }) {
     <Screen wide className="report-root">
       <TopBar
         title="Performance report"
-        subtitle={`${playerName} · ${matches.length} match${matches.length !== 1 ? "es" : ""} · ${agg.rallies} rallies`}
+        subtitle={`${playerName} · ${scopeLabel} · ${matches.length} match${matches.length !== 1 ? "es" : ""} · ${agg.rallies} rallies`}
         onBack={() => setScreen("home")}
         right={<PrintBtn onClick={printReport} />}
       />
+
+      {/* Scope selector */}
+      <Card className="mb-3 print:hidden">
+        <div className="flex items-center justify-between mb-2">
+          <div className="text-[10px] uppercase tracking-[0.22em] text-neutral-500 font-semibold">Scope</div>
+          {matches.length === 0 && <span className="text-[11px] text-amber-400">No matches in this scope</span>}
+        </div>
+        <div className="flex flex-wrap gap-1.5">
+          <ScopePill active={scope === "career"} onClick={() => setScope("career")}>
+            Full career ({allMatches.length})
+          </ScopePill>
+          {allTournaments.length > 0 && (
+            <div className="w-full my-1 text-[10px] text-neutral-600 uppercase tracking-wider">Tournaments</div>
+          )}
+          {allTournaments.map((t) => (
+            <ScopePill
+              key={t.name}
+              active={scope === `tour:${t.name}`}
+              onClick={() => setScope(`tour:${t.name}`)}
+            >
+              {t.name} ({t.matches.length})
+            </ScopePill>
+          ))}
+          {allMatches.length > 0 && (
+            <div className="w-full my-1 text-[10px] text-neutral-600 uppercase tracking-wider">Single match</div>
+          )}
+          {[...allMatches].reverse().slice(0, 8).map((m) => (
+            <ScopePill
+              key={m.id}
+              active={scope === `match:${m.id}`}
+              onClick={() => setScope(`match:${m.id}`)}
+            >
+              {m.id} · {m.opponent}
+            </ScopePill>
+          ))}
+        </div>
+      </Card>
 
       {/* ---------- HEADER ---------- */}
       <div className="border-b-2 border-emerald-700 pb-3 mb-4 print:border-black">
@@ -1039,6 +1105,21 @@ function PrintBtn({ onClick }) {
       className="px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold active:scale-95 print:hidden"
     >
       🖨 Print / Save PDF
+    </button>
+  );
+}
+
+function ScopePill({ active, onClick, children }) {
+  return (
+    <button
+      onClick={onClick}
+      className={`px-2.5 py-1 rounded-full text-[11px] font-semibold border transition active:scale-95 ${
+        active
+          ? "bg-emerald-700 border-emerald-500 text-white"
+          : "bg-neutral-900 border-neutral-700 text-neutral-300 hover:bg-neutral-800"
+      }`}
+    >
+      {children}
     </button>
   );
 }

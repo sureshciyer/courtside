@@ -8,6 +8,7 @@ import ExportScreen from "./screens/Export.jsx";
 import Patterns from "./screens/Patterns.jsx";
 import Report from "./screens/Report.jsx";
 import SettingsScreen from "./screens/Settings.jsx";
+import Scouting from "./screens/Scouting.jsx";
 
 const SCREENS = {
   home: Home,
@@ -18,6 +19,7 @@ const SCREENS = {
   exportScreen: ExportScreen,
   patterns: Patterns,
   report: Report,
+  scouting: Scouting,
   settings: SettingsScreen,
 };
 
