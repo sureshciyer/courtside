@@ -136,11 +136,13 @@ export default function Home({ setScreen }) {
           <BigBtn tone="accent" onClick={() => setScreen("report")}>
             Full performance report
           </BigBtn>
-          <BigBtn tone="secondary" onClick={() => setScreen("exportScreen")}>
-            Export / Download JSON
-          </BigBtn>
         </>
       )}
+      {/* Backup/Restore is always reachable — a brand-new device needs
+          Restore before any matches exist. */}
+      <BigBtn tone="secondary" onClick={() => setScreen("exportScreen")}>
+        💾 Backup / Restore
+      </BigBtn>
 
       <div className="mt-auto pt-6 text-center flex flex-col items-center gap-2">
         <button

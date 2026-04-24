@@ -447,6 +447,11 @@ export const useMatchStore = create(
           opponents: data?.opponents ?? {},
         }),
 
+      // Merge a backup envelope into current state without destroying local
+      // work. Matches / paused matches dedupe by id; opponent profiles
+      // profile-wise merge so existing local notes/AI insights win.
+      applyBackupMerge: (mergedPatch) => set(mergedPatch),
+
       currentSet: () => {
         const m = get().currentMatch;
         return m ? m.sets[m.currentSet] : null;
