@@ -2,7 +2,7 @@ import { useMemo, useState } from "react";
 import { useMatchStore } from "../store/useMatchStore.js";
 import { reportBundle, matchSummary, classifyStyle, setAggregate, pct, listTournaments } from "../lib/analytics.js";
 import { SHOT_NAMES, ZONE_LABELS } from "../constants/badminton.js";
-import { Screen, TopBar, Card, BigBtn } from "../components/ui.jsx";
+import { Screen, TopBar, Card, BigBtn, Badge } from "../components/ui.jsx";
 
 // ===== Pro-level performance report. Each section is driven by the real
 // matches array from the Zustand store — no sample data, all deterministic.
