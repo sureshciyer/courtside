@@ -136,7 +136,7 @@ export function Select({ label, value, onChange, options }) {
 }
 
 // Chip / stat / small helper components retained for legacy compat.
-export function Chip({ label, filled, color, onClick }) {
+export function Chip({ label, filled, onClick }) {
   return (
     <button
       onClick={onClick}

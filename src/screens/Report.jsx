@@ -65,9 +65,9 @@ export default function Report({ setScreen }) {
     ? `Match ${scope.slice(6)}`
     : "Full career";
 
-  const { agg, style, tournaments, distribution, lengthProfile, serveReturn,
+  const { agg, tournaments, distribution, lengthProfile, serveReturn,
           clutch, fatigue, deception, effectiveness,
-          winnerZones, errorZonesAll, allZones, recs, rallies, advanced } = bundle;
+          winnerZones, errorZonesAll, allZones, recs, advanced } = bundle;
   const wonMatches = matches.filter((m) => {
     const setsWon = m.sets.filter((s) => s.sonScore > s.oppScore).length;
     return setsWon > m.sets.length / 2;
@@ -535,7 +535,7 @@ function TournamentBlock({ t, index }) {
         <div className="text-xs text-neutral-400">{style.desc}</div>
       </div>
 
-      {t.matches.map((m, mi) => <MatchBlock key={m.id} match={m} />)}
+      {t.matches.map((m) => <MatchBlock key={m.id} match={m} />)}
     </div>
   );
 }

@@ -5,6 +5,8 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "lint": "eslint .",
+    "prebuild": "eslint .",
     "build": "vite build",
     "preview": "vite preview"
   },
@@ -14,8 +16,13 @@
     "zustand": "^4.5.5"
   },
   "devDependencies": {
+    "@eslint/js": "^9.39.4",
     "@vitejs/plugin-react": "^4.3.4",
     "autoprefixer": "^10.4.20",
+    "eslint": "^9.39.4",
+    "eslint-plugin-react": "^7.37.5",
+    "eslint-plugin-react-hooks": "^7.1.1",
+    "globals": "^17.5.0",
     "postcss": "^8.4.49",
     "tailwindcss": "^3.4.17",
     "vite": "^6.0.7"

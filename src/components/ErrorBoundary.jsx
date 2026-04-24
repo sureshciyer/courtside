@@ -37,13 +37,10 @@ export default class ErrorBoundary extends Component {
     const text = JSON.stringify(report, null, 2);
     try {
       await navigator.clipboard.writeText(text);
-      // Lightweight confirm; avoid importing toast libs.
-      // eslint-disable-next-line no-alert
       alert("Error report copied to clipboard. Paste it into chat to share.");
     } catch {
       // Clipboard can fail (http, permissions); fall back to prompt so the
       // user can still copy the text manually.
-      // eslint-disable-next-line no-alert
       window.prompt("Copy the error JSON:", text);
     }
   };

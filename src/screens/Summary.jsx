@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useMatchStore } from "../store/useMatchStore.js";
 import { Screen, TopBar, Stat, BigBtn, Card, SectionLabel } from "../components/ui.jsx";
 import {
@@ -13,7 +13,15 @@ export default function Summary({ setScreen }) {
   const playerName = useMatchStore((s) => s.settings?.playerName) || "Player";
   const updateMatchAiInsights = useMatchStore((s) => s.updateMatchAiInsights);
   const m = matches[matches.length - 1];
-  if (!m) { setScreen("home"); return null; }
+
+  // Hooks must be unconditional — initialize with a safe fallback so we can
+  // run them before the "no match" early return below.
+  const [insightsDraft, setInsightsDraft] = useState(m?.aiInsights || "");
+  const [copied, setCopied] = useState(false);
+
+  // Route away if there's genuinely nothing to summarise.
+  useEffect(() => { if (!m) setScreen("home"); }, [m, setScreen]);
+  if (!m) return null;
 
   const r = m.rallies;
   const w = r.filter((x) => x.pointWonBy === "S").length;
@@ -26,10 +34,6 @@ export default function Summary({ setScreen }) {
   const setWins = m.sets.filter((s) => s.sonScore > s.oppScore).length;
   const won = setWins > m.sets.length / 2;
 
-  // Local state for the AI-insights textarea (prevents lag on every keystroke;
-  // debounces into the store).
-  const [insightsDraft, setInsightsDraft] = useState(m.aiInsights || "");
-  const [copied, setCopied] = useState(false);
   const saveInsights = () => updateMatchAiInsights(m.id, insightsDraft);
 
   const handleExportMarkdown = async (action) => {

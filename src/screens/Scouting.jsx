@@ -3,8 +3,6 @@ import { useMatchStore } from "../store/useMatchStore.js";
 import {
   listOpponents,
   opponentDossier,
-  normalizeOpponentKey,
-  pct,
 } from "../lib/analytics.js";
 import {
   battlePlanMarkdown,
@@ -26,10 +24,15 @@ import {
 
 export default function Scouting({ setScreen }) {
   const matches = useMatchStore((s) => s.matches);
-  const opponents = useMatchStore((s) => s.opponents) || {};
+  // `?? {}` would change identity each render. Keep the store value as-is
+  // and default inside the memo body so dependencies stay stable.
+  const opponents = useMatchStore((s) => s.opponents);
   const [selectedKey, setSelectedKey] = useState(null);
 
-  const opponentRows = useMemo(() => listOpponents(matches, opponents), [matches, opponents]);
+  const opponentRows = useMemo(
+    () => listOpponents(matches, opponents || {}),
+    [matches, opponents]
+  );
 
   if (selectedKey) {
     const row = opponentRows.find((o) => o.key === selectedKey);
@@ -154,14 +157,13 @@ function OpponentList({ rows, onPick, onBack }) {
 // ===================================================================
 function Dossier({ name, onBack, goHome }) {
   const matches = useMatchStore((s) => s.matches);
-  const opponents = useMatchStore((s) => s.opponents) || {};
+  const opponents = useMatchStore((s) => s.opponents);
   const playerName = useMatchStore((s) => s.settings?.playerName) || "Player";
   const updateOpponentProfile = useMatchStore((s) => s.updateOpponentProfile);
   const deleteOpponentProfile = useMatchStore((s) => s.deleteOpponentProfile);
 
-  const key = normalizeOpponentKey(name);
   const dossier = useMemo(
-    () => opponentDossier(matches, name, opponents),
+    () => opponentDossier(matches, name, opponents || {}),
     [matches, name, opponents]
   );
 
