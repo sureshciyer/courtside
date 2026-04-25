@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useMatchStore } from "../store/useMatchStore.js";
-import { Screen, TopBar, Stat, BigBtn, Card, SectionLabel } from "../components/ui.jsx";
+import { Screen, TopBar, Stat, BigBtn, Card, SectionLabel, AutoSavingTextarea } from "../components/ui.jsx";
 import {
   matchAnalysisMarkdown,
   copyMarkdown,
@@ -16,9 +16,7 @@ export default function Summary({ setScreen }) {
   const goals = useMatchStore((s) => s.goals) || [];
   const m = matches[matches.length - 1];
 
-  // Hooks must be unconditional — initialize with a safe fallback so we can
-  // run them before the "no match" early return below.
-  const [insightsDraft, setInsightsDraft] = useState(m?.aiInsights || "");
+  // Hook state must stay unconditional — tracked before any early return.
   const [copied, setCopied] = useState(false);
 
   // Route away if there's genuinely nothing to summarise.
@@ -36,10 +34,9 @@ export default function Summary({ setScreen }) {
   const setWins = m.sets.filter((s) => s.sonScore > s.oppScore).length;
   const won = setWins > m.sets.length / 2;
 
-  const saveInsights = () => updateMatchAiInsights(m.id, insightsDraft);
-
   const handleExportMarkdown = async (action) => {
-    saveInsights();
+    // Pull the latest match state in case the autosaving textarea committed
+    // a keystroke in the last millisecond.
     const latest = useMatchStore.getState().matches.find((x) => x.id === m.id) || m;
     const md = matchAnalysisMarkdown(latest, { playerName });
     if (action === "copy") {
@@ -150,20 +147,12 @@ export default function Summary({ setScreen }) {
           the Match Analysis Markdown (## AI critique section). */}
       <Card className="mt-3 mb-3">
         <SectionLabel>🧠 AI tactical insights</SectionLabel>
-        <textarea
-          value={insightsDraft}
-          onChange={(e) => setInsightsDraft(e.target.value)}
-          onBlur={saveInsights}
+        <AutoSavingTextarea
+          value={m.aiInsights || ""}
+          onSave={(text) => updateMatchAiInsights(m.id, text)}
           placeholder="Paste Claude / Gemini's critique of this match here. It will appear in the Match Analysis Markdown export under the ## AI critique section."
-          className="w-full min-h-[120px] p-3 rounded-lg border border-neutral-800 bg-neutral-950 text-neutral-200 text-[13px] font-display placeholder-neutral-600 focus:outline-none focus:border-emerald-600 resize-y leading-relaxed"
+          statusLabel="critique"
         />
-        <div className="flex items-center justify-between mt-2">
-          <span className="text-[11px] text-neutral-500">Saves on blur. Survives refresh.</span>
-          <button
-            onClick={saveInsights}
-            className="px-3 py-1 rounded-md bg-neutral-800 hover:bg-neutral-700 text-neutral-200 text-xs font-semibold border border-neutral-700"
-          >Save</button>
-        </div>
       </Card>
 
       <Card className="mb-3">

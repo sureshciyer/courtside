@@ -1,3 +1,4 @@
+import { useEffect, useRef, useState } from "react";
 import { ZONES } from "../constants/badminton.js";
 
 // Shared dark-themed primitives used across all non-capture screens.
@@ -224,5 +225,111 @@ export function MeterRow({ label, value, total, tone = "emerald" }) {
         <div className={`h-full ${colors[tone]} transition-all`} style={{ width: `${pct}%` }} />
       </div>
     </div>
+  );
+}
+
+// ===================================================================
+//  AutoSavingTextarea
+// ===================================================================
+// Drop-in textarea for long-form inputs (AI critique, scouting notes).
+// Saves to the caller's store action (a) 600ms after typing stops, (b) on
+// blur, and (c) whenever the external `value` prop changes (screen swap).
+// Shows a live status chip so the user always knows what state the text is
+// in — no hidden Save button, no "did it save?" ambiguity.
+
+export function AutoSavingTextarea({
+  value,
+  onSave,
+  placeholder,
+  minHeight = 120,
+  className = "",
+  debounceMs = 600,
+  statusLabel = "insights",
+}) {
+  const [draft, setDraft] = useState(value || "");
+  const [savedValue, setSavedValue] = useState(value || "");
+  const [status, setStatus] = useState("saved");      // saved | unsaved | saving
+  const [savedAt, setSavedAt] = useState(null);
+
+  // Keep the save function fresh without re-triggering the debounce timer.
+  const onSaveRef = useRef(onSave);
+  useEffect(() => { onSaveRef.current = onSave; }, [onSave]);
+
+  // External value changed (user navigated to a different match / opponent).
+  // Re-baseline both draft and saved value.
+  useEffect(() => {
+    setDraft(value || "");
+    setSavedValue(value || "");
+    setStatus("saved");
+  }, [value]);
+
+  // Debounced autosave: typing sets "unsaved", stops → "saving" → "saved".
+  useEffect(() => {
+    if (draft === savedValue) return;
+    setStatus("unsaved");
+    const t = setTimeout(() => {
+      setStatus("saving");
+      onSaveRef.current(draft);
+      setSavedValue(draft);
+      setSavedAt(Date.now());
+      // Quick back to "saved" so the chip doesn't stick at "saving".
+      setTimeout(() => setStatus("saved"), 160);
+    }, debounceMs);
+    return () => clearTimeout(t);
+  }, [draft, savedValue, debounceMs]);
+
+  // Blur also commits immediately — so tapping "End rally →" or navigating
+  // away within 600ms doesn't lose the last keystroke.
+  const handleBlur = () => {
+    if (draft === savedValue) return;
+    onSaveRef.current(draft);
+    setSavedValue(draft);
+    setSavedAt(Date.now());
+    setStatus("saved");
+  };
+
+  return (
+    <div>
+      <textarea
+        value={draft}
+        onChange={(e) => setDraft(e.target.value)}
+        onBlur={handleBlur}
+        placeholder={placeholder}
+        style={{ minHeight }}
+        className={`w-full p-3 rounded-lg border border-neutral-800 bg-neutral-950 text-neutral-200 text-[13px] placeholder-neutral-600 focus:outline-none focus:border-emerald-600 resize-y leading-relaxed ${className}`}
+      />
+      <div className="flex items-center justify-between mt-1.5">
+        <span className="text-[11px] text-neutral-500">
+          Autosaves while you type
+        </span>
+        <SaveStatusChip status={status} savedAt={savedAt} label={statusLabel} />
+      </div>
+    </div>
+  );
+}
+
+function SaveStatusChip({ status, savedAt, label }) {
+  if (status === "saving") {
+    return (
+      <span className="text-[11px] font-semibold text-sky-400 inline-flex items-center gap-1">
+        💾 Saving…
+      </span>
+    );
+  }
+  if (status === "unsaved") {
+    return (
+      <span className="text-[11px] font-semibold text-amber-400 inline-flex items-center gap-1">
+        ● Unsaved
+      </span>
+    );
+  }
+  // saved
+  if (!savedAt) {
+    return <span className="text-[11px] font-semibold text-neutral-500">—</span>;
+  }
+  return (
+    <span className="text-[11px] font-semibold text-emerald-400 inline-flex items-center gap-1">
+      ✓ Saved {label}
+    </span>
   );
 }

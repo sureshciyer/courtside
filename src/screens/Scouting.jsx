@@ -12,7 +12,7 @@ import {
   slugify,
 } from "../lib/markdown.js";
 import {
-  Screen, TopBar, Card, BigBtn, Stat, HeatGrid, SectionLabel, Badge,
+  Screen, TopBar, Card, BigBtn, Stat, HeatGrid, SectionLabel, Badge, AutoSavingTextarea,
 } from "../components/ui.jsx";
 
 // Scouting screen. Two views:
@@ -167,19 +167,11 @@ function Dossier({ name, onBack, goHome }) {
     [matches, name, opponents]
   );
 
-  const [notesDraft, setNotesDraft] = useState(dossier.notes);
-  const [insightsDraft, setInsightsDraft] = useState(dossier.aiInsights);
   const [copyMsg, setCopyMsg] = useState(null);
-
-  const saveNotes = () => updateOpponentProfile(name, { notes: notesDraft });
-  const saveInsights = () => updateOpponentProfile(name, { aiInsights: insightsDraft });
-
   const flash = (msg) => { setCopyMsg(msg); setTimeout(() => setCopyMsg(null), 2000); };
 
   const handleBattlePlan = async (action) => {
-    // Commit any unsaved edits so they flow into the export.
-    saveNotes(); saveInsights();
-    // Re-read latest from store to include the just-saved edits.
+    // Re-read latest from store to include any in-flight autosaved edits.
     const latestOpponents = useMatchStore.getState().opponents || {};
     const freshDossier = opponentDossier(matches, name, latestOpponents);
     const md = battlePlanMarkdown(freshDossier, { playerName });
@@ -262,25 +254,24 @@ function Dossier({ name, onBack, goHome }) {
       {/* Scouting notes */}
       <Card className="mb-3">
         <SectionLabel>📝 Scouting notes (manual)</SectionLabel>
-        <textarea
-          value={notesDraft}
-          onChange={(e) => setNotesDraft(e.target.value)}
-          onBlur={saveNotes}
+        <AutoSavingTextarea
+          value={dossier.notes}
+          onSave={(text) => updateOpponentProfile(name, { notes: text })}
           placeholder="e.g. weak backhand · fast at net · struggles with flick serves · goes short on 2nd shot"
-          className="w-full min-h-[90px] p-3 rounded-lg border border-neutral-800 bg-neutral-950 text-neutral-200 text-[13px] placeholder-neutral-600 focus:outline-none focus:border-emerald-600 resize-y leading-relaxed"
+          minHeight={90}
+          statusLabel="notes"
         />
-        <div className="text-[11px] text-neutral-500 mt-1.5">Saves on blur. Appears in the Battle Plan under 📝 Scouting notes.</div>
+        <div className="text-[11px] text-neutral-500 mt-1.5">Appears in the Battle Plan under 📝 Scouting notes.</div>
       </Card>
 
       {/* AI insights */}
       <Card className="mb-3">
         <SectionLabel>🧠 AI insights (opponent-level critique)</SectionLabel>
-        <textarea
-          value={insightsDraft}
-          onChange={(e) => setInsightsDraft(e.target.value)}
-          onBlur={saveInsights}
+        <AutoSavingTextarea
+          value={dossier.aiInsights}
+          onSave={(text) => updateOpponentProfile(name, { aiInsights: text })}
           placeholder="Paste Claude / Gemini's analysis across all your matches vs this opponent. Lives on the opponent profile and surfaces in every Battle Plan."
-          className="w-full min-h-[120px] p-3 rounded-lg border border-neutral-800 bg-neutral-950 text-neutral-200 text-[13px] placeholder-neutral-600 focus:outline-none focus:border-emerald-600 resize-y leading-relaxed"
+          statusLabel="insights"
         />
         <div className="text-[11px] text-neutral-500 mt-1.5">Appears in the Battle Plan under 🧠 AI INSIGHTS.</div>
       </Card>
