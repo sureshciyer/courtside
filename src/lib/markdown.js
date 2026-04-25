@@ -4,8 +4,24 @@
 // Both produce ready-to-paste Markdown (tables, headings, code fences) that
 // Claude / Gemini / any other LLM can consume directly.
 
-import { reportBundle, setAggregate, pct } from "./analytics.js";
+import { reportBundle, setAggregate, pct, winningSequences } from "./analytics.js";
 import { SHOT_NAMES, ZONE_LABELS } from "../constants/badminton.js";
+
+// Local helper — tally landing zones for shots tagged with a given quality.
+// Used by Patterns Markdown so the "Effective-tagged" heatmap mirrors the
+// Patterns screen toggle.
+const zoneTalliesByQuality = (rallies, quality) => {
+  const z = {};
+  for (const r of rallies) {
+    for (const s of r.shots) {
+      if (s.quality === quality && s.zone) z[s.zone] = (z[s.zone] || 0) + 1;
+    }
+  }
+  return z;
+};
+
+// Thin alias so the Patterns Markdown reads cleanly.
+const winningSequencesFromBundle = (rallies, n) => winningSequences(rallies, n);
 
 // ---------- tiny formatting helpers ----------
 
@@ -495,6 +511,253 @@ const rawDataBlock = (match) => {
   return H2("📦 Raw data for LLM analysis") +
     P("Paste the JSON below into Claude / Gemini for deeper pattern analysis.") +
     codeBlock(JSON.stringify(match, null, 2));
+};
+
+// ===================================================================
+//  3. PERFORMANCE REPORT (career / scope)
+// ===================================================================
+//
+// Aggregate Markdown over a set of matches. Same content shape as the
+// on-screen Report: headline, per-match table, distributions, heatmaps,
+// serve/return, length profile, clutch, fatigue, effectiveness,
+// deception, full Tactical Cleverness block, coaching recs, raw JSON.
+export const performanceReportMarkdown = (matches, { playerName = "Player", scopeLabel = "Full career" } = {}) => {
+  if (!matches || !matches.length) {
+    return H1(`🏸 Performance report — ${playerName}`) +
+      P(`_No matches in scope (${scopeLabel})._`);
+  }
+
+  const totalRallies = matches.reduce((a, m) => a + (m.rallies?.length || 0), 0);
+  const wonMatches = matches.filter((m) => {
+    const setsWon = m.sets.filter((s) => s.sonScore > s.oppScore).length;
+    return setsWon > m.sets.length / 2;
+  }).length;
+
+  let md = H1(`🏸 Performance report — ${playerName}`);
+  md += P(
+    `**Scope:** ${scopeLabel}  \n` +
+    `**Matches:** ${matches.length} (${wonMatches}W - ${matches.length - wonMatches}L)  \n` +
+    `**Rallies:** ${totalRallies}  \n` +
+    `**Generated:** ${new Date().toLocaleDateString()}`
+  );
+
+  if (totalRallies === 0) {
+    md += H2("No rally data");
+    md += P("_Matches have no shot-level data captured._");
+    return md;
+  }
+
+  const bundle = reportBundle(matches);
+  const { agg, distribution, lengthProfile, serveReturn, clutch, fatigue,
+          deception, effectiveness, winnerZones, errorZonesAll, allZones,
+          recs, advanced } = bundle;
+
+  // Per-match rollup
+  md += H2("Match list");
+  md += table(
+    ["Match", "Date", "Opponent", "Tournament", "Score", "Result"],
+    matches.map((m) => {
+      const setsWon = m.sets.filter((s) => s.sonScore > s.oppScore).length;
+      const won = setsWon > m.sets.length / 2;
+      return [
+        `\`${m.id}\``,
+        m.date || "—",
+        m.opponent || "—",
+        m.tournament || "—",
+        m.sets.map((s) => `${s.sonScore}-${s.oppScore}`).join(", "),
+        won ? "✅ Won" : "❌ Lost",
+      ];
+    })
+  );
+
+  // Headline
+  md += H2("Headline stats");
+  md += table(["Metric", "Value"], [
+    ["Total rallies", agg.rallies],
+    ["Won / Lost", `${agg.won} / ${agg.lost}`],
+    ["Win rate", `${pct(agg.won, agg.rallies)}%`],
+    ["Winners", agg.w],
+    ["Unforced errors", agg.ue_son],
+    ["Avg rally length", `${agg.avgLen} shots`],
+  ]);
+
+  // Shot distribution
+  if (distribution.length) {
+    md += H2("Shot distribution");
+    md += table(
+      ["Shot", "Count", "Share"],
+      distribution.slice(0, 15).map((s) => [s.name, s.count, `${s.pct}%`])
+    );
+  }
+
+  // Heatmaps
+  md += H2("Zone heatmaps");
+  md += H3("Winner zones");
+  md += zoneTable(winnerZones);
+  md += H3("Unforced-error zones");
+  md += zoneTable(errorZonesAll);
+  md += H3("All shot targets");
+  md += zoneTable(allZones);
+
+  // Serve / return
+  md += H2("Serve & return");
+  md += table(
+    ["Metric", "Value", "Pts"],
+    [
+      ["Serve win %", `${serveReturn.serveWinPct}%`, `${serveReturn.serveWon}/${serveReturn.servePoints}`],
+      ["Return win %", `${serveReturn.returnWinPct}%`, `${serveReturn.returnWon}/${serveReturn.returnPoints}`],
+      ["3-shot opening win %", `${serveReturn.threeShotWinPct}%`, `${serveReturn.threeShotWon}/${serveReturn.threeShotPoints}`],
+    ]
+  );
+
+  // Length
+  md += H2("Rally length profile");
+  md += table(
+    ["Bucket", "Won", "Lost", "Win %"],
+    Object.entries(lengthProfile).map(([b, { w, l }]) => [`${b} shots`, w, l, `${pct(w, w + l)}%`])
+  );
+
+  // Clutch
+  md += H2("Clutch performance (16+)");
+  md += table(["Metric", "Value"], [
+    ["Clutch points", clutch.clutchPoints],
+    ["Clutch win %", `${clutch.clutchWinPct}%`],
+    ["Clutch UE rate", `${clutch.clutchUEPct}%`],
+    ["Overall UE rate", `${clutch.overallUEPct}%`],
+    ["Deficit", `${clutch.deficit >= 0 ? "+" : ""}${clutch.deficit}pp`],
+  ]);
+
+  // Fatigue
+  md += H2("Fatigue & endurance");
+  md += table(
+    ["Half", "UE", "Points", "Rate"],
+    [
+      ["First (pts 1–11)", fatigue.firstHalf.ue, fatigue.firstHalf.points, `${fatigue.firstHalf.rate}%`],
+      ["Second (pts 12–21)", fatigue.secondHalf.ue, fatigue.secondHalf.points, `${fatigue.secondHalf.rate}%`],
+    ]
+  );
+  md += P(`**Fatigue ratio:** ${fatigue.ratio}× _(≥ 2.0 flags a concern)_`);
+
+  // Effectiveness
+  md += H2("Effectiveness index");
+  md += P(
+    `**E:** ${effectiveness.ePct}% · **N:** ${effectiveness.nPct}% · **I:** ${effectiveness.iPct}%  ` +
+    `_(Pro target: E ≥ 35 %, I ≤ 15 %)_`
+  );
+
+  // Deception
+  md += H2("Predictability & deception");
+  md += P(`Holds: ${deception.holds} · Slices: ${deception.slices} · Per-match: ${deception.perMatch}`);
+
+  // Tactical cleverness (full)
+  md += H2("🧠 Tactical cleverness");
+  md += tacticalClevernessMarkdown(advanced);
+
+  // Coaching recs
+  md += H2("Coaching recommendations");
+  if (recs.length) {
+    recs.forEach((r, i) => { md += H3(`${i + 1}. ${r.title}`); md += P(r.body); });
+  } else {
+    md += P("_Not enough data to generate recommendations._");
+  }
+
+  // Raw payload
+  md += H2("📦 Raw data for LLM analysis");
+  md += P("Trimmed match list — paste into Claude/Gemini for follow-up analysis.");
+  md += codeBlock(JSON.stringify(matches, null, 2));
+
+  return md;
+};
+
+// ===================================================================
+//  4. PATTERNS INTELLIGENCE
+// ===================================================================
+//
+// Same content as the Patterns screen — coaching tips, disruption
+// conversion, effectiveness heatmaps, critical return, winning sequences.
+// Optionally filtered by opponent style (e.g. "only against Attacking").
+export const patternsMarkdown = (matches, { playerName = "Player", styleFilter = "All" } = {}) => {
+  const filtered = styleFilter === "All"
+    ? matches
+    : matches.filter((m) => (m.playerStyle || "Unknown") === styleFilter);
+
+  let md = H1(`🎯 Patterns intelligence — ${playerName}`);
+  md += P(
+    `**Style filter:** ${styleFilter}  \n` +
+    `**Matches in scope:** ${filtered.length}  \n` +
+    `**Generated:** ${new Date().toLocaleDateString()}`
+  );
+
+  if (!filtered.length) {
+    md += P(`_No matches captured against the "${styleFilter}" style yet._`);
+    return md;
+  }
+
+  const rallies = filtered.flatMap((m) => m.rallies);
+  const bundle = reportBundle(filtered);
+  const adv = bundle.advanced;
+
+  // Coaching tips (priority output)
+  md += H2("🧠 Coaching summary (auto-generated)");
+  if (bundle.recs.length) {
+    bundle.recs.forEach((r, i) => {
+      md += `### ${i + 1}. ${r.title}\n\n${r.body}\n\n`;
+    });
+  } else {
+    md += P("_Not enough rallies yet — keep capturing to unlock tips._");
+  }
+
+  // Disruption conversion
+  md += H2("Disruption conversion");
+  md += P(
+    `Disruption shots (smashes, half-smashes, kills, net shots past the opening) ` +
+    `appear in ${bundle.advanced.killChains.totalWinners > 0 ? `at least ${bundle.advanced.killChains.totalWinners} winning rall${bundle.advanced.killChains.totalWinners !== 1 ? "ies" : "y"}` : "limited rallies so far"}.`
+  );
+
+  // Effectiveness heatmaps (3 versions)
+  md += H2("Shot effectiveness heatmaps");
+  md += H3("Winner zones");
+  md += zoneTable(bundle.winnerZones);
+  md += H3("Effective-tagged shot zones");
+  md += zoneTable(zoneTalliesByQuality(rallies, "Effective"));
+  md += H3("Error zones (UE + Ineffective)");
+  md += zoneTable(bundle.errorZonesAll);
+
+  // Critical return
+  md += H2("Critical return analysis");
+  if (adv.recoveryLeak.total > 0) {
+    md += P(
+      `Of ${adv.recoveryLeak.total} opponent winners against ${playerName}, ` +
+      `${adv.recoveryLeak.longDiagonalPct}% are long diagonals (gap ≥ 2.5).`
+    );
+    md += table(
+      ["Pattern", "Gap", "Count"],
+      adv.recoveryLeak.top.map((p) => [`Z${p.sonZone} → Z${p.oppZone}`, p.dist.toFixed(2), `×${p.count}`])
+    );
+  } else {
+    md += P("_No opponent-winner rallies in this scope._");
+  }
+
+  // Winning sequences (3-shot)
+  md += H2("Top winning sequences");
+  for (const n of [2, 3, 4]) {
+    const seqs = winningSequencesFromBundle(rallies, n).slice(0, 8);
+    md += H3(`${n}-shot`);
+    if (seqs.length) {
+      md += table(
+        ["Sequence", "Count"],
+        seqs.map((s) => [`\`${s.seq}\``, `×${s.count}`])
+      );
+    } else {
+      md += P(`_Not enough winning rallies of length ≥ ${n}._`);
+    }
+  }
+
+  // Tactical Cleverness block (the deep one)
+  md += H2("🧠 Tactical cleverness deep-dive");
+  md += tacticalClevernessMarkdown(adv);
+
+  return md;
 };
 
 // ===================================================================

@@ -88,6 +88,12 @@ export const useMatchStore = create(
         lastRestoreStats: null,
       },
 
+      // Tactical goals the user has set for the next match. Each entry:
+      //   { id, metricKey, comparator: "lt"|"gt", threshold, params, createdAt }
+      // Evaluated on Patterns (against all matches as a baseline) and on
+      // the post-match Summary (against the latest match's rallies).
+      goals: [],
+
       settings: {
         playerName: "Arjun",
         handedness: "R",
@@ -95,6 +101,12 @@ export const useMatchStore = create(
 
       updateSettings: (patch) =>
         set((state) => ({ settings: { ...state.settings, ...patch } })),
+
+      // ---------- goals ----------
+      addGoal: (goal) => set((state) => ({ goals: [...state.goals, goal] })),
+      removeGoal: (id) =>
+        set((state) => ({ goals: state.goals.filter((g) => g.id !== id) })),
+      clearGoals: () => set({ goals: [] }),
 
       // ---------- opponent profiles ----------
 
@@ -505,6 +517,7 @@ export const useMatchStore = create(
         opponents: state.opponents,
         settings: state.settings,
         syncStatus: state.syncStatus,
+        goals: state.goals,
       }),
       // Incremental migrations. Keep the chain additive so older snapshots
       // can walk through every step.
@@ -555,6 +568,7 @@ export const useMatchStore = create(
         pausedMatches: persisted?.pausedMatches || current.pausedMatches || [],
         opponents: { ...(current.opponents || {}), ...(persisted?.opponents || {}) },
         syncStatus: { ...(current.syncStatus || {}), ...(persisted?.syncStatus || {}) },
+        goals: persisted?.goals || current.goals || [],
       }),
     }
   )

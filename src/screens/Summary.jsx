@@ -7,11 +7,13 @@ import {
   downloadMarkdown,
   slugify,
 } from "../lib/markdown.js";
+import { evaluateGoal, goalLabel, findMetric } from "../lib/goals.js";
 
 export default function Summary({ setScreen }) {
   const matches = useMatchStore((s) => s.matches);
   const playerName = useMatchStore((s) => s.settings?.playerName) || "Player";
   const updateMatchAiInsights = useMatchStore((s) => s.updateMatchAiInsights);
+  const goals = useMatchStore((s) => s.goals) || [];
   const m = matches[matches.length - 1];
 
   // Hooks must be unconditional — initialize with a safe fallback so we can
@@ -87,6 +89,61 @@ export default function Summary({ setScreen }) {
           <Stat label="Clutch pts" value={cl.length} tone="warn" />
           <Stat label="Clutch won" value={`${cw}/${cl.length}`} tone={cw >= cl.length / 2 ? "good" : "bad"} />
         </div>
+      )}
+
+      {/* Goal evaluation — green/red per goal vs this match's rallies */}
+      {goals.length > 0 && (
+        <Card className="mb-3">
+          <SectionLabel>🎯 Match goals</SectionLabel>
+          <div className="flex flex-col gap-1.5">
+            {goals.map((g) => {
+              const result = evaluateGoal(g, m.rallies);
+              const m_metric = findMetric(g.metricKey);
+              const valueStr = result.hasData ? `${result.value}${m_metric?.unit || ""}` : "no data";
+              return (
+                <div
+                  key={g.id}
+                  className={`flex items-center gap-3 p-2.5 rounded-md border ${
+                    result.met === true
+                      ? "bg-emerald-950/40 border-emerald-700"
+                      : result.met === false
+                      ? "bg-red-950/40 border-red-700"
+                      : "bg-neutral-900 border-neutral-700"
+                  }`}
+                >
+                  <div className={`w-7 h-7 rounded-full flex items-center justify-center font-bold text-sm shrink-0 ${
+                    result.met === true ? "bg-emerald-600 text-white"
+                      : result.met === false ? "bg-red-600 text-white"
+                      : "bg-neutral-700 text-neutral-300"
+                  }`}>
+                    {result.met === true ? "✓" : result.met === false ? "✕" : "?"}
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <div className={`text-sm font-bold truncate ${
+                      result.met === true ? "text-emerald-200"
+                        : result.met === false ? "text-red-200"
+                        : "text-neutral-300"
+                    }`}>
+                      {goalLabel(g)}
+                    </div>
+                    <div className="text-[11px] text-neutral-400 font-mono">
+                      This match: <span className="font-bold text-neutral-200">{valueStr}</span>
+                      {result.met !== null && (
+                        <span className={result.met ? " text-emerald-400" : " text-red-400"}>
+                          {" "}· {result.met ? "goal met" : "goal missed"}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+          <p className="text-[11px] text-neutral-500 mt-2 leading-relaxed">
+            Goals are evaluated against the rallies of this match only. Edit them on
+            the Patterns screen between matches.
+          </p>
+        </Card>
       )}
 
       {/* AI insights editor — critique pasted back from Claude/Gemini lands in

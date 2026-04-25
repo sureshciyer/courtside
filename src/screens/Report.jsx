@@ -3,6 +3,7 @@ import { useMatchStore } from "../store/useMatchStore.js";
 import { reportBundle, matchSummary, classifyStyle, setAggregate, pct, listTournaments } from "../lib/analytics.js";
 import { SHOT_NAMES, ZONE_LABELS } from "../constants/badminton.js";
 import { Screen, TopBar, Card, BigBtn, Badge } from "../components/ui.jsx";
+import { performanceReportMarkdown, copyMarkdown, downloadMarkdown, slugify } from "../lib/markdown.js";
 
 // ===== Pro-level performance report. Each section is driven by the real
 // matches array from the Zustand store — no sample data, all deterministic.
@@ -39,6 +40,31 @@ export default function Report({ setScreen }) {
   };
 
   const printReport = () => window.print();
+
+  // Markdown export honours the current scope (career / tournament / match).
+  const [mdFlash, setMdFlash] = useState(null);
+  const flash = (s) => { setMdFlash(s); setTimeout(() => setMdFlash(null), 1800); };
+  const buildScopedMarkdown = () => {
+    const label =
+      scope === "career"
+        ? "Full career"
+        : scope.startsWith("tour:")
+        ? `Tournament: ${scope.slice(5)}`
+        : scope.startsWith("match:")
+        ? `Match ${scope.slice(6)}`
+        : "Full career";
+    return performanceReportMarkdown(matches, { playerName, scopeLabel: label });
+  };
+  const handleCopyMd = async () => {
+    const ok = await copyMarkdown(buildScopedMarkdown());
+    flash(ok ? "Markdown copied" : "Copy failed");
+  };
+  const handleDownloadMd = () => {
+    const stamp = new Date().toISOString().split("T")[0];
+    const scopeSlug = scope === "career" ? "career" : slugify(scope.replace(/^(tour:|match:)/, ""));
+    downloadMarkdown(buildScopedMarkdown(), `courtside_report_${scopeSlug}_${stamp}.md`);
+    flash("Report downloaded");
+  };
 
   if (allMatches.length === 0) {
     return (
@@ -82,6 +108,12 @@ export default function Report({ setScreen }) {
         right={<PrintBtn onClick={printReport} />}
       />
 
+      {mdFlash && (
+        <div className="cs-toast fixed top-3 left-1/2 -translate-x-1/2 z-50 bg-emerald-700 text-white px-4 py-1.5 rounded-full text-xs font-semibold shadow-lg">
+          {mdFlash}
+        </div>
+      )}
+
       {/* Scope selector */}
       <Card className="mb-3 print:hidden">
         <div className="flex items-center justify-between mb-2">
@@ -116,6 +148,20 @@ export default function Report({ setScreen }) {
               {m.id} · {m.opponent}
             </ScopePill>
           ))}
+        </div>
+        <div className="flex gap-2 mt-3 pt-3 border-t border-neutral-800">
+          <button
+            onClick={handleCopyMd}
+            className="flex-1 py-2 rounded-md bg-emerald-700 hover:bg-emerald-600 text-white text-xs font-bold active:scale-95"
+          >
+            📋 Copy Markdown ({scopeLabel})
+          </button>
+          <button
+            onClick={handleDownloadMd}
+            className="flex-1 py-2 rounded-md bg-neutral-800 hover:bg-neutral-700 border border-neutral-700 text-neutral-100 text-xs font-bold active:scale-95"
+          >
+            ⬇ Download .md
+          </button>
         </div>
       </Card>
 

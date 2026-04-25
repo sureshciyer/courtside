@@ -11,6 +11,8 @@ import {
 import {
   Screen, TopBar, Card, SectionLabel, Select, HeatGrid, MeterRow, Badge,
 } from "../components/ui.jsx";
+import { patternsMarkdown, copyMarkdown, downloadMarkdown, slugify } from "../lib/markdown.js";
+import { GOAL_METRICS, findMetric, goalLabel, goalValue, buildGoal } from "../lib/goals.js";
 
 const HEATMAP_TABS = [
   { key: "winners",   label: "Winners",   tone: "emerald" },
@@ -20,9 +22,25 @@ const HEATMAP_TABS = [
 
 export default function Patterns({ setScreen }) {
   const matches = useMatchStore((s) => s.matches);
+  const playerName = useMatchStore((s) => s.settings?.playerName) || "Player";
   const [styleFilter, setStyleFilter] = useState("All");
   const [seqN, setSeqN] = useState(3);
   const [heatKind, setHeatKind] = useState("winners");
+  const [mdFlash, setMdFlash] = useState(null);
+  const flash = (s) => { setMdFlash(s); setTimeout(() => setMdFlash(null), 1800); };
+
+  const handleCopyMd = async () => {
+    const md = patternsMarkdown(matches, { playerName, styleFilter });
+    const ok = await copyMarkdown(md);
+    flash(ok ? "Patterns copied" : "Copy failed");
+  };
+  const handleDownloadMd = () => {
+    const md = patternsMarkdown(matches, { playerName, styleFilter });
+    const stamp = new Date().toISOString().split("T")[0];
+    const styleSlug = styleFilter === "All" ? "all" : slugify(styleFilter);
+    downloadMarkdown(md, `courtside_patterns_${styleSlug}_${stamp}.md`);
+    flash("Patterns downloaded");
+  };
 
   const { rallies, matchCount } = useMemo(() => {
     const filtered = styleFilter === "All"
@@ -46,6 +64,12 @@ export default function Patterns({ setScreen }) {
         onBack={() => setScreen("home")}
       />
 
+      {mdFlash && (
+        <div className="cs-toast fixed top-3 left-1/2 -translate-x-1/2 z-50 bg-emerald-700 text-white px-4 py-1.5 rounded-full text-xs font-semibold shadow-lg">
+          {mdFlash}
+        </div>
+      )}
+
       <Card className="mb-3">
         <Select
           label="Opponent style filter"
@@ -53,10 +77,27 @@ export default function Patterns({ setScreen }) {
           onChange={setStyleFilter}
           options={["All", ...PLAYER_STYLES]}
         />
-        <div className="text-[11px] text-neutral-500 leading-relaxed">
+        <div className="text-[11px] text-neutral-500 leading-relaxed mb-3">
           Filters every section below so you can compare tactical patterns against specific opponent profiles.
         </div>
+        <div className="flex gap-2 pt-2 border-t border-neutral-800">
+          <button
+            onClick={handleCopyMd}
+            className="flex-1 py-2 rounded-md bg-emerald-700 hover:bg-emerald-600 text-white text-xs font-bold active:scale-95"
+          >
+            📋 Copy patterns Markdown
+          </button>
+          <button
+            onClick={handleDownloadMd}
+            className="flex-1 py-2 rounded-md bg-neutral-800 hover:bg-neutral-700 border border-neutral-700 text-neutral-100 text-xs font-bold active:scale-95"
+          >
+            ⬇ Download .md
+          </button>
+        </div>
       </Card>
+
+      {/* Goal tracker */}
+      <GoalsCard rallies={rallies} />
 
       {/* Coaching tips */}
       <Card tone="accent" className="mb-3">
@@ -211,5 +252,195 @@ export default function Patterns({ setScreen }) {
 
       <div className="h-4" />
     </Screen>
+  );
+}
+
+// ===================================================================
+//                          Goal tracker UI
+// ===================================================================
+
+function GoalsCard({ rallies }) {
+  const goals = useMatchStore((s) => s.goals) || [];
+  const removeGoal = useMatchStore((s) => s.removeGoal);
+  const [adding, setAdding] = useState(false);
+
+  return (
+    <Card className="mb-3" tone="warn">
+      <div className="flex items-center justify-between mb-2">
+        <SectionLabel>🎯 Goals for next match</SectionLabel>
+        {!adding && (
+          <button
+            onClick={() => setAdding(true)}
+            className="px-2.5 py-1 rounded-md bg-amber-700 hover:bg-amber-600 text-white text-[11px] font-bold active:scale-95"
+          >
+            + Add goal
+          </button>
+        )}
+      </div>
+
+      {goals.length === 0 && !adding && (
+        <p className="text-[11px] text-neutral-400 leading-relaxed">
+          Set targets for the next match (e.g. "reduce Zone 9 loss rate to &lt; 50 %"). After
+          the match, the Summary screen will mark each goal green or red.
+        </p>
+      )}
+
+      {goals.length > 0 && (
+        <div className="flex flex-col gap-1.5 mb-2">
+          {goals.map((g) => {
+            const baseline = goalValue(g, rallies);
+            return (
+              <div key={g.id} className="flex items-center gap-2 p-2 rounded-md bg-neutral-900 border border-neutral-800">
+                <div className="flex-1 min-w-0">
+                  <div className="text-xs font-bold text-neutral-100 truncate">{goalLabel(g)}</div>
+                  <div className="text-[11px] text-neutral-500 font-mono">
+                    Baseline so far: {baseline === null ? <span className="text-neutral-600">no data</span> : <span className="text-neutral-300">{baseline}{findMetric(g.metricKey)?.unit || ""}</span>}
+                  </div>
+                </div>
+                <button
+                  onClick={() => removeGoal(g.id)}
+                  className="px-2 py-1 rounded text-[10px] font-bold text-red-300 bg-red-950/40 border border-red-900 hover:bg-red-900/40"
+                >
+                  ✕
+                </button>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {adding && <GoalForm onClose={() => setAdding(false)} />}
+    </Card>
+  );
+}
+
+function GoalForm({ onClose }) {
+  const addGoal = useMatchStore((s) => s.addGoal);
+  const [metricKey, setMetricKey] = useState("disruptionConversionPct");
+  const [comparator, setComparator] = useState("gt");
+  const [threshold, setThreshold] = useState(65);
+  const [zone, setZone] = useState(9);
+  const [serveType, setServeType] = useState("DS");
+
+  const metric = findMetric(metricKey);
+  const needsZone = !!metric?.needsZone;
+  const needsServe = !!metric?.needsServe;
+
+  // Default comparator nudges based on metric direction (lower vs higher).
+  const handleMetricChange = (key) => {
+    setMetricKey(key);
+    const m = findMetric(key);
+    if (m?.direction === "higher") setComparator("gt");
+    else if (m?.direction === "lower") setComparator("lt");
+  };
+
+  const handleSubmit = () => {
+    const n = Number(threshold);
+    if (Number.isNaN(n)) return;
+    const params = {};
+    if (needsZone) params.zone = Number(zone);
+    if (needsServe) params.serveType = serveType;
+    addGoal(buildGoal({ metricKey, comparator, threshold: n, params }));
+    onClose();
+  };
+
+  return (
+    <div className="bg-neutral-950 border border-neutral-800 rounded-lg p-3 mt-1 space-y-2">
+      <div>
+        <label className="text-[10px] uppercase tracking-wider text-neutral-500 font-semibold block mb-1">Metric</label>
+        <select
+          value={metricKey}
+          onChange={(e) => handleMetricChange(e.target.value)}
+          className="w-full px-2.5 py-2 rounded-md bg-neutral-900 border border-neutral-700 text-neutral-100 text-sm focus:outline-none focus:border-emerald-600"
+        >
+          {GOAL_METRICS.map((m) => (
+            <option key={m.key} value={m.key}>{m.label}</option>
+          ))}
+        </select>
+        {metric?.description && (
+          <div className="text-[11px] text-neutral-500 mt-1 leading-snug">{metric.description}</div>
+        )}
+      </div>
+
+      {needsZone && (
+        <div>
+          <label className="text-[10px] uppercase tracking-wider text-neutral-500 font-semibold block mb-1">Zone</label>
+          <div className="grid grid-cols-9 gap-1">
+            {[1,2,3,4,5,6,7,8,9].map((z) => (
+              <button
+                key={z}
+                onClick={() => setZone(z)}
+                className={`py-1.5 rounded text-xs font-bold border ${zone === z ? "bg-emerald-700 border-emerald-500 text-white" : "bg-neutral-900 border-neutral-700 text-neutral-400 hover:bg-neutral-800"}`}
+              >
+                {z}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {needsServe && (
+        <div>
+          <label className="text-[10px] uppercase tracking-wider text-neutral-500 font-semibold block mb-1">Serve type</label>
+          <div className="grid grid-cols-3 gap-1">
+            {["LS","FS","DS"].map((t) => (
+              <button
+                key={t}
+                onClick={() => setServeType(t)}
+                className={`py-1.5 rounded text-xs font-bold border ${serveType === t ? "bg-purple-700 border-purple-500 text-white" : "bg-neutral-900 border-neutral-700 text-neutral-400 hover:bg-neutral-800"}`}
+              >
+                {t}
+              </button>
+            ))}
+          </div>
+        </div>
+      )}
+
+      <div className="grid grid-cols-2 gap-2">
+        <div>
+          <label className="text-[10px] uppercase tracking-wider text-neutral-500 font-semibold block mb-1">Direction</label>
+          <div className="grid grid-cols-2 gap-1">
+            <button
+              onClick={() => setComparator("lt")}
+              className={`py-1.5 rounded text-xs font-bold border ${comparator === "lt" ? "bg-emerald-700 border-emerald-500 text-white" : "bg-neutral-900 border-neutral-700 text-neutral-400"}`}
+            >
+              &lt; less than
+            </button>
+            <button
+              onClick={() => setComparator("gt")}
+              className={`py-1.5 rounded text-xs font-bold border ${comparator === "gt" ? "bg-emerald-700 border-emerald-500 text-white" : "bg-neutral-900 border-neutral-700 text-neutral-400"}`}
+            >
+              &gt; greater than
+            </button>
+          </div>
+        </div>
+        <div>
+          <label className="text-[10px] uppercase tracking-wider text-neutral-500 font-semibold block mb-1">
+            Target value{metric?.unit ? ` (${metric.unit || ""})` : ""}
+          </label>
+          <input
+            type="number"
+            value={threshold}
+            onChange={(e) => setThreshold(e.target.value)}
+            className="w-full px-2.5 py-2 rounded-md bg-neutral-900 border border-neutral-700 text-neutral-100 text-sm focus:outline-none focus:border-emerald-600"
+          />
+        </div>
+      </div>
+
+      <div className="flex gap-2 pt-1">
+        <button
+          onClick={handleSubmit}
+          className="flex-1 py-2 rounded-md bg-emerald-700 hover:bg-emerald-600 text-white font-bold text-sm active:scale-95"
+        >
+          ✓ Save goal
+        </button>
+        <button
+          onClick={onClose}
+          className="flex-1 py-2 rounded-md bg-neutral-800 hover:bg-neutral-700 border border-neutral-700 text-neutral-200 font-bold text-sm"
+        >
+          Cancel
+        </button>
+      </div>
+    </div>
   );
 }
