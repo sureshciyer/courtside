@@ -836,8 +836,9 @@ export const performanceReportMarkdown = (matches, { playerName = "Player", scop
   return md;
 };
 
-// Predictability & response-pattern table — same shape as the on-screen
-// section, hides directional_only patterns, surfaces alt-response notes.
+// Predictability & response-pattern table. Same shape as the on-screen
+// section: main table for total >= 5, compact "directional only" section
+// for total 3–4, and just a count for total <= 2.
 const predictabilityMarkdown = (patterns) => {
   let md = H2("🎯 Predictability & response patterns");
   if (!patterns || patterns.length === 0) {
@@ -845,54 +846,83 @@ const predictabilityMarkdown = (patterns) => {
     md += P("_Patterns are deterministic counts from tagged rallies. Claims require minimum sample size._");
     return md;
   }
-  const major = patterns.filter((p) => !p.classifications.includes("directional_only"));
-  const directional = patterns.length - major.length;
 
-  if (major.length === 0) {
+  const major = patterns.filter((p) => p.total >= 5);
+  const directional = patterns.filter((p) => p.total === 3 || p.total === 4);
+  const below = patterns.filter((p) => p.total > 0 && p.total < 3);
+
+  const renderRow = (p) => [
+    p.stimulusLabel,
+    p.topResponse
+      ? `Son ${p.topResponse.responseGrip || "?"}-${p.topResponse.responseShotType}-${p.topResponse.responseDirection || "?"} to Z${p.topResponse.responseTargetZone}`
+      : "—",
+    p.topResponse ? `${p.topResponse.count}/${p.total} (${p.topResponsePct}%)` : "—",
+    `${p.topResponseWinPct}%`,
+    `${p.topResponseUePct}%`,
+    p.classifications.map((c) => `\`${c}\``).join(" "),
+    p.evidence
+      .map((e) => `${e.matchId} R${e.rallyIndex}${e.score ? ` @ ${e.score}` : ""}`)
+      .join(", "),
+  ];
+
+  if (major.length === 0 && directional.length === 0) {
     md += P(
-      `_No pattern reaches the 5-occurrence threshold yet — ${directional} ` +
-      `directional-only pattern${directional !== 1 ? "s" : ""} below threshold._`,
+      `_No pattern reaches the 3-occurrence directional threshold yet — ${below.length} ` +
+      `pattern${below.length !== 1 ? "s" : ""} with 1–2 occurrences (no claim)._`,
     );
-    md += P("_Patterns are deterministic counts from tagged rallies. Claims require minimum sample size._");
+    md += P("_Patterns are deterministic counts from tagged rallies. Claims require minimum sample size (5)._");
     return md;
   }
 
-  md += table(
-    ["Incoming pattern", "Top response", "Frequency", "Win %", "UE %", "Classification", "Evidence"],
-    major.map((p) => [
-      p.stimulusLabel,
-      p.topResponse
-        ? `Son ${p.topResponse.responseGrip || "?"}-${p.topResponse.responseShotType}-${p.topResponse.responseDirection || "?"} to Z${p.topResponse.responseTargetZone}`
-        : "—",
-      p.topResponse ? `${p.topResponse.count}/${p.total} (${p.topResponsePct}%)` : "—",
-      `${p.topResponseWinPct}%`,
-      `${p.topResponseUePct}%`,
-      p.classifications.map((c) => `\`${c}\``).join(" "),
-      p.evidence
-        .map((e) => `${e.matchId} R${e.rallyIndex}${e.score ? ` @ ${e.score}` : ""}`)
-        .join(", "),
-    ]),
-  );
+  // Main table — total >= 5
+  if (major.length > 0) {
+    md += table(
+      ["Incoming pattern", "Top response", "Frequency", "Win %", "UE %", "Classification", "Evidence"],
+      major.map(renderRow),
+    );
 
-  // Surface alt-response recommendations as bullets after the table.
-  const withAlt = major.filter((p) => p.alternativeRecommendation);
-  if (withAlt.length) {
-    md += H3("Alternative-response recommendations");
-    md += withAlt
-      .map(
-        (p) =>
-          `- **${p.stimulusLabel}** — ${p.alternativeRecommendation.note} ` +
-          `Alt wins ${p.alternativeRecommendation.altWinPct}%, ` +
-          `top wins ${p.alternativeRecommendation.topWinPct}% ` +
-          `(Δ +${p.alternativeRecommendation.deltaPct}pp).`,
-      )
-      .join("\n") + "\n\n";
+    // Surface alt-response recommendations as bullets after the table.
+    const withAlt = major.filter((p) => p.alternativeRecommendation);
+    if (withAlt.length) {
+      md += H3("Alternative-response recommendations");
+      md += withAlt
+        .map(
+          (p) =>
+            `- **${p.stimulusLabel}** — ${p.alternativeRecommendation.note} ` +
+            `Alt wins ${p.alternativeRecommendation.altWinPct}%, ` +
+            `top wins ${p.alternativeRecommendation.topWinPct}% ` +
+            `(Δ +${p.alternativeRecommendation.deltaPct}pp).`,
+        )
+        .join("\n") + "\n\n";
+    }
+  } else {
+    md += P("_No pattern reaches the 5-occurrence threshold yet — see directional-only section below._");
   }
 
-  if (directional > 0) {
-    md += P(`_${directional} additional pattern${directional !== 1 ? "s" : ""} below 5-occurrence threshold (directional only, hidden)._`);
+  // Directional section — total 3 or 4
+  if (directional.length > 0) {
+    md += H3("Directional only / low sample (3–4 occurrences)");
+    md += table(
+      ["Incoming", "Top response", "Frequency", "Win %", "Evidence"],
+      directional.map((p) => [
+        p.stimulusLabel,
+        p.topResponse
+          ? `Son ${p.topResponse.responseGrip || "?"}-${p.topResponse.responseShotType}-${p.topResponse.responseDirection || "?"} to Z${p.topResponse.responseTargetZone}`
+          : "—",
+        `${p.topResponse?.count ?? 0}/${p.total} (${p.topResponsePct}%)`,
+        `${p.topResponseWinPct}%`,
+        p.evidence
+          .map((e) => `${e.matchId} R${e.rallyIndex}${e.score ? ` @ ${e.score}` : ""}`)
+          .join(", "),
+      ]),
+    );
+    md += P("_Surfaced for awareness only. Don't form coaching prescriptions from sample sizes 3–4._");
   }
-  md += P("_Patterns are deterministic counts from tagged rallies. Claims require minimum sample size._");
+
+  if (below.length > 0) {
+    md += P(`_+${below.length} pattern${below.length !== 1 ? "s" : ""} with 1–2 occurrences (no claim)._`);
+  }
+  md += P("_Patterns are deterministic counts from tagged rallies. Claims require minimum sample size (5)._");
   return md;
 };
 

@@ -1,3 +1,32 @@
+// =============================================================
+//  PERSPECTIVE CONVENTIONS — read me before touching anything.
+//
+//  1. ZONES are recorded from Son's court perspective for *every*
+//     shot, regardless of who hit it. So Zone 7 means "Son's
+//     back-left" in every rally object, never "the hitter's
+//     back-left from their own side." This lets us infer Son's
+//     standing position by reading the prior shot's landing zone
+//     (deriveShotContext / inferredOriginZone).
+//
+//  2. E / N / I (quality) is recorded from the *hitter's* perspective.
+//     - Son E means Son hit a strong shot.
+//     - Son I means Son hit a weak shot.
+//     - Opp E means the opponent hit a strong shot — i.e. PRESSURING
+//       against Son.
+//     - Opp I means the opponent hit a weak shot — i.e. a WEAK return
+//       / OPPORTUNITY for Son.
+//     Use deriveShotContext(...).qualityForSonPerspective when you
+//     need the Son-relative reading.
+//
+//  3. SHOTS strictly alternate between players. Combined with the
+//     server field on the rally, that lets us derive `hitBy` for any
+//     shot index (shotHitter helper).
+//
+//  4. SCORE on the rally is the *pre-rally* score (set when the rally
+//     was opened by initRally). "16-15" therefore means "Son had 16
+//     and Opp had 15 *before* this rally began."
+// =============================================================
+
 import { DISRUPTION_SHOTS } from "../constants/badminton.js";
 
 export const OPENING_LENGTH = 3;

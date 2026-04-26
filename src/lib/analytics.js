@@ -1,5 +1,14 @@
 // Pure analytics helpers for the Patterns dashboard and the Report screen.
 // No React, no store — everything here consumes the plain `matches` array.
+//
+// Perspective conventions (full notes at the top of ./rally.js):
+//   - Zones are always Son's court. Same number means same place for
+//     every shot, regardless of who hit it.
+//   - E/N/I quality is from the hitter's perspective. Opp E → pressure
+//     against Son; Opp I → opportunity for Son. Use
+//     `deriveShotContext(...).qualityForSonPerspective` when you need the
+//     Son-relative reading.
+//   - Rally `score` is the pre-rally score (set at rally open).
 
 import { DISRUPTION_SHOTS, SHOT_NAMES } from "../constants/badminton.js";
 import { deriveShotContext, shotHitter } from "./rally.js";
@@ -1003,9 +1012,15 @@ const formatStimulus = (oppShot) =>
 const formatResponse = (sonShot) =>
   `Son ${sonShot.grip || "?"}-${sonShot.shotType}-${sonShot.dir || "?"}-Z${sonShot.zone}`;
 
-// Whether a rally satisfies the requested pressure phase. `prevRally` is
-// the rally captured immediately before `r` in the same dataset (used for
-// "after_lost_point").
+// Whether a rally satisfies the requested pressure phase.
+//
+// Score-based phases (clutch / leading / trailing) read `r.score`, which
+// is the *pre-rally* score recorded by initRally() at the moment the rally
+// began (e.g. "16-15" → Son leading, in clutch).
+//
+// `after_lost_point` requires `prevRally` to be the immediately preceding
+// rally *within the same match and the same set*. The caller is
+// responsible for resetting `prevRally` at set/match boundaries.
 const matchPhaseFilter = (r, prevRally, phase) => {
   if (!phase || phase === "all") return true;
   const [son, opp] = (r.score || "0-0").split("-").map((n) => Number(n) || 0);
@@ -1057,71 +1072,75 @@ const computeAlternativeRecommendation = (responses) => {
 export const analyzeResponsePredictability = (matches, options = {}) => {
   const { phase = "all", maxEvidence = 5 } = options;
 
-  // Look-up table for evidence enrichment (tournament + opponent).
-  const matchById = new Map();
-  for (const m of matches || []) matchById.set(m.id, m);
-
-  // Walk all rallies in order so "after_lost_point" can read the prior
-  // rally outcome. Rallies inside one match are already in capture order.
-  const allRallies = (matches || []).flatMap((m) => m.rallies || []);
-
   const groups = new Map();
-  let prevRally = null;
-  for (let rIdx = 0; rIdx < allRallies.length; rIdx++) {
-    const r = allRallies[rIdx];
-    if (!matchPhaseFilter(r, prevRally, phase)) {
-      prevRally = r;
-      continue;
-    }
 
-    const shots = r.shots || [];
-    for (let i = 1; i < shots.length; i++) {
-      if (shotHitter(r, i) !== "S") continue;
-      const son = shots[i];
-      const prev = shots[i - 1];
-      // Stimulus + response need both shotType + zone.
-      if (!prev?.shotType || prev.zone == null) continue;
-      if (!son?.shotType || son.zone == null) continue;
+  // Walk per-match per-set so "after_lost_point" never crosses a set or
+  // match boundary, and so rallyIndex is the *within-match* (1-based)
+  // position the user expects to see in evidence ("M001 R12").
+  for (const m of matches || []) {
+    let prevRally = null;
+    let prevSet = null;
+    for (let rIdx = 0; rIdx < (m.rallies || []).length; rIdx++) {
+      const r = m.rallies[rIdx];
 
-      const stimulusKey = `${prev.shotType}-Z${prev.zone}`;
-      const responseKey = RESP_KEY(son);
+      // Reset prevRally when the set changes (or first rally).
+      if (prevSet !== null && prevSet !== r.set) prevRally = null;
 
-      if (!groups.has(stimulusKey)) {
-        groups.set(stimulusKey, {
-          stimulusKey,
-          incomingShotType: prev.shotType,
-          incomingZone: prev.zone,
-          events: [],
+      if (!matchPhaseFilter(r, prevRally, phase)) {
+        prevRally = r;
+        prevSet = r.set;
+        continue;
+      }
+
+      const shots = r.shots || [];
+      for (let i = 1; i < shots.length; i++) {
+        if (shotHitter(r, i) !== "S") continue;
+        const son = shots[i];
+        const prev = shots[i - 1];
+        if (!prev?.shotType || prev.zone == null) continue;
+        if (!son?.shotType || son.zone == null) continue;
+
+        const stimulusKey = `${prev.shotType}-Z${prev.zone}`;
+        const responseKey = RESP_KEY(son);
+
+        if (!groups.has(stimulusKey)) {
+          groups.set(stimulusKey, {
+            stimulusKey,
+            incomingShotType: prev.shotType,
+            incomingZone: prev.zone,
+            events: [],
+          });
+        }
+        const g = groups.get(stimulusKey);
+        g.events.push({
+          responseKey,
+          responseShotType: son.shotType,
+          responseGrip: son.grip,
+          responseDirection: son.dir,
+          responseTargetZone: son.zone,
+          responseQuality: son.quality,
+          rallyResult: r.result,
+          sonWonRally: r.pointWonBy === "S",
+          sonUE: r.result === "UE" && r.pointWonBy === "O",
+          score: r.score,
+          clutch: r.phase === "Clutch",
+          evidence: {
+            matchId: r.matchId,
+            tournamentName: m.tournament || null,
+            opponent: m.opponent || null,
+            set: r.set,
+            rallyIndex: rIdx + 1, // 1-based within-match index
+            score: r.score,
+            sequenceText: `${formatStimulus(prev)} → ${formatResponse(son)}`,
+            pointWonBy: r.pointWonBy,
+            result: r.result,
+          },
         });
       }
-      const g = groups.get(stimulusKey);
-      const m = matchById.get(r.matchId);
-      g.events.push({
-        responseKey,
-        responseShotType: son.shotType,
-        responseGrip: son.grip,
-        responseDirection: son.dir,
-        responseTargetZone: son.zone,
-        responseQuality: son.quality,
-        rallyResult: r.result,
-        sonWonRally: r.pointWonBy === "S",
-        sonUE: r.result === "UE" && r.pointWonBy === "O",
-        score: r.score,
-        clutch: r.phase === "Clutch",
-        evidence: {
-          matchId: r.matchId,
-          tournamentName: m?.tournament || null,
-          opponent: m?.opponent || null,
-          set: r.set,
-          rallyIndex: rIdx,
-          score: r.score,
-          sequenceText: `${formatStimulus(prev)} → ${formatResponse(son)}`,
-          pointWonBy: r.pointWonBy,
-          result: r.result,
-        },
-      });
+
+      prevRally = r;
+      prevSet = r.set;
     }
-    prevRally = r;
   }
 
   // Build patterns from groups.

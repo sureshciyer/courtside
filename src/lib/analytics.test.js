@@ -1310,6 +1310,141 @@ describe("analyzeResponsePredictability (Phase: pattern mining)", () => {
     expect(out[0].alternativeRecommendation.deltaPct).toBeGreaterThanOrEqual(20);
   });
 
+  // ---- Set / match boundary handling for after_lost_point ----
+  it("after_lost_point does NOT carry across set boundaries", () => {
+    // 3 lost rallies followed by 5 stimulus rallies — but the set
+    // boundary lies right before the stimulus rallies. None should pass.
+    const lossInSet1 = rally({
+      matchId: "M001", set: 1,
+      pointWonBy: "O", result: "UE",
+      shots: [shot({ shotType: "LS", zone: 2 }), shot({ shotType: "DR", zone: 5 })],
+    });
+    const lossInSet1FinalRally = lossInSet1; // last rally of set 1
+    const stimRallyInSet2 = stimulusRally(
+      { shotType: "NT", zone: 3 }, { shotType: "LF", grip: "F", dir: "CR", zone: 9 },
+    );
+    // Patch its set to 2 so it's a fresh set
+    const stimSet2 = () => ({ ...stimRallyInSet2, set: 2 });
+
+    const m = match({
+      id: "M001",
+      rallies: [
+        lossInSet1, lossInSet1, lossInSet1, lossInSet1FinalRally,
+        ...Array(5).fill(0).map(stimSet2),
+      ],
+    });
+    const out = analyzeResponsePredictability([m], { phase: "after_lost_point" });
+    // First rally of set 2 should NOT be classified as after_lost_point,
+    // so none of the 5 stimulus rallies pass (each first follows the set
+    // boundary; subsequent ones would only pass if any in-set predecessor
+    // was a loss — but they're all wins).
+    expect(out.length === 0 || out[0].total < 5).toBe(true);
+    // Verify in detail: no stimulus rallies should leak through.
+    if (out.length > 0) {
+      // Could happen if rally 2..5 of set 2 see a previous-rally loss; but
+      // all set-2 rallies are wins, so no.
+      expect(out[0].total).toBe(0);
+    }
+  });
+
+  it("after_lost_point does NOT carry across match boundaries", () => {
+    const lossInM1 = rally({
+      matchId: "M001", set: 1,
+      pointWonBy: "O", result: "UE",
+      shots: [shot({ shotType: "LS", zone: 2 }), shot({ shotType: "DR", zone: 5 })],
+    });
+    const m1 = match({ id: "M001", rallies: [lossInM1] });
+    const stimM2 = stimulusRally(
+      { shotType: "NT", zone: 3 }, { shotType: "LF", grip: "F", dir: "CR", zone: 9 },
+    );
+    const m2 = match({
+      id: "M002",
+      rallies: Array(5).fill(0).map(() => ({ ...stimM2, matchId: "M002" })),
+    });
+    const out = analyzeResponsePredictability([m1, m2], { phase: "after_lost_point" });
+    // First rally of M002 should not see M001's last loss.
+    // Rallies 2..5 of M002 are preceded by wins, so none pass either.
+    expect(out.length === 0 || out[0].total === 0).toBe(true);
+  });
+
+  // ---- Pre-rally score thresholds ----
+  it("pre-rally score 16-15 is clutch; 15-15 is not", () => {
+    const r16 = stimulusRally(
+      { shotType: "NT", zone: 3 }, { shotType: "LF", grip: "F", dir: "CR", zone: 9 },
+      { score: "16-15" },
+    );
+    const r15 = stimulusRally(
+      { shotType: "NT", zone: 3 }, { shotType: "LF", grip: "F", dir: "CR", zone: 9 },
+      { score: "15-15" },
+    );
+    const m = matchOf([
+      ...Array(3).fill(r16),
+      ...Array(2).fill(r15),
+    ]);
+    const out = analyzeResponsePredictability([m], { phase: "clutch" });
+    // 3 rallies pass (16-15 max=16 ≥ 16) but threshold needs ≥5, so
+    // pattern shows up but is below the 5-occurrence major threshold.
+    expect(out[0]?.total ?? 0).toBe(3);
+  });
+
+  it("pre-rally score 17-15 is leading", () => {
+    const r = stimulusRally(
+      { shotType: "NT", zone: 3 }, { shotType: "LF", grip: "F", dir: "CR", zone: 9 },
+      { score: "17-15" },
+    );
+    const m = matchOf(Array(5).fill(r));
+    const out = analyzeResponsePredictability([m], { phase: "leading" });
+    expect(out[0].total).toBe(5);
+  });
+
+  it("pre-rally score 15-17 is trailing", () => {
+    const r = stimulusRally(
+      { shotType: "NT", zone: 3 }, { shotType: "LF", grip: "F", dir: "CR", zone: 9 },
+      { score: "15-17" },
+    );
+    const m = matchOf(Array(5).fill(r));
+    const out = analyzeResponsePredictability([m], { phase: "trailing" });
+    expect(out[0].total).toBe(5);
+  });
+
+  it("pre-rally score 15-15 is neither leading nor trailing", () => {
+    const r = stimulusRally(
+      { shotType: "NT", zone: 3 }, { shotType: "LF", grip: "F", dir: "CR", zone: 9 },
+      { score: "15-15" },
+    );
+    const m = matchOf(Array(5).fill(r));
+    expect(analyzeResponsePredictability([m], { phase: "leading" })).toEqual([]);
+    expect(analyzeResponsePredictability([m], { phase: "trailing" })).toEqual([]);
+  });
+
+  it("evidence rallyIndex is 1-based within match (not global)", () => {
+    const m1 = matchOf(
+      Array(5).fill(0).map(() =>
+        stimulusRally({ shotType: "NT", zone: 3 }, { shotType: "LF", grip: "F", dir: "CR", zone: 9 }),
+      ),
+    );
+    const m2 = match({
+      id: "M002",
+      tournament: "Tour A",
+      opponent: "Opp Y",
+      rallies: Array(2).fill(0).map(() =>
+        rally({
+          matchId: "M002",
+          server: "O",
+          pointWonBy: "S",
+          result: "W",
+          shots: [shot({ shotType: "NT", zone: 3 }), shot({ shotType: "LF", grip: "F", dir: "CR", zone: 9 })],
+        }),
+      ),
+    });
+    const out = analyzeResponsePredictability([m1, m2]);
+    const indicesM1 = out[0].evidence.filter((e) => e.matchId === "M001").map((e) => e.rallyIndex);
+    const indicesM2 = out[0].evidence.filter((e) => e.matchId === "M002").map((e) => e.rallyIndex);
+    // Each match's first evidence rally is index 1 (not the global pos).
+    if (indicesM1.length) expect(indicesM1[0]).toBe(1);
+    if (indicesM2.length) expect(indicesM2[0]).toBe(1);
+  });
+
   it("only counts Son responses (skips opponent-played responses)", () => {
     // Son serves; opp returns; Son hits a 3rd shot. The Son shot at index 2
     // is the response to opp's shot at index 1. Index 1 is NOT a Son

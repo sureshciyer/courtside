@@ -186,3 +186,56 @@ describe("deriveShotContext", () => {
     expect(ctx.phase).toBe("Mid");
   });
 });
+
+// Consolidated perspective-rule test — locks the documented conventions
+// in place so a future refactor can't silently flip them.
+describe("perspective rules (locked)", () => {
+  it("zones are always Son's-court (no flip applied for opp shots)", () => {
+    const r = rally({
+      server: "S",
+      shots: [
+        shot({ shotType: "LS", zone: 2 }), // Son serve lands at Z2
+        shot({ shotType: "DR", zone: 7 }), // Opp return — Z7 means Son's back-left
+      ],
+    });
+    // The opp's shot zone is recorded as 7 — the same Zone 7 that all
+    // other helpers interpret as Son's back-left. We do not flip.
+    expect(r.shots[1].zone).toBe(7);
+    // Derived for next Son shot (would be index 2): origin would be 7.
+    // Validate via a 3-shot rally:
+    const r2 = rally({
+      server: "S",
+      shots: [
+        shot({ shotType: "LS", zone: 2 }),
+        shot({ shotType: "DR", zone: 7 }),
+        shot({ shotType: "CL", zone: 9, grip: "B" }),
+      ],
+    });
+    const ctx = deriveShotContext(r2, 2);
+    expect(ctx.hitBy).toBe("S");
+    expect(ctx.inferredOriginZone).toBe(7); // exact zone value preserved
+  });
+
+  it("Son E / Opp E: hitter perspective is preserved; Son perspective flips for Opp", () => {
+    // Son E shot — qualityForSonPerspective stays "Effective".
+    const sonE = rally({
+      server: "S",
+      shots: [shot({ shotType: "LS", zone: 2 }), shot(), shot({ quality: "Effective" })],
+    });
+    expect(deriveShotContext(sonE, 2).qualityForSonPerspective).toBe("Effective");
+
+    // Opp E shot — qualityForSonPerspective becomes "pressuring".
+    const oppE = rally({
+      server: "S",
+      shots: [shot({ shotType: "LS", zone: 2 }), shot({ quality: "Effective" })],
+    });
+    expect(deriveShotContext(oppE, 1).qualityForSonPerspective).toBe("pressuring");
+
+    // Opp I shot — qualityForSonPerspective becomes "weak".
+    const oppI = rally({
+      server: "S",
+      shots: [shot({ shotType: "LS", zone: 2 }), shot({ quality: "Ineffective" })],
+    });
+    expect(deriveShotContext(oppI, 1).qualityForSonPerspective).toBe("weak");
+  });
+});

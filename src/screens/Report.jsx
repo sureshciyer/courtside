@@ -907,18 +907,21 @@ function ProLevelFindings({
 //  alternative outperforming it?
 // ===================================================================
 function PredictabilityTable({ patterns, confidence }) {
-  // Hide the directional_only patterns from the main table — surface
-  // them only as a count line so the report doesn't overclaim.
-  const major = patterns.filter((p) => !p.classifications.includes("directional_only"));
-  const directional = patterns.length - major.length;
+  // Split by sample size:
+  //   major     = total >= 5  → main table, claims allowed
+  //   directional = total 3–4 → compact secondary section, "directional only"
+  //   below     = total 1–2  → just a count, never a claim
+  const major = patterns.filter((p) => p.total >= 5);
+  const directional = patterns.filter((p) => p.total === 3 || p.total === 4);
+  const below = patterns.filter((p) => p.total > 0 && p.total < 3);
 
-  if (major.length === 0) {
+  if (major.length === 0 && directional.length === 0) {
     return (
       <div className="bg-neutral-900 border border-neutral-800 rounded-lg p-4 text-xs text-neutral-400 leading-relaxed print:border-neutral-400 print:bg-white">
-        Not enough qualifying stimulus → response samples yet (need 5+ per pattern).
-        {directional > 0 && ` ${directional} pattern${directional !== 1 ? "s" : ""} below sample threshold (directional only).`}
+        Not enough qualifying stimulus → response samples yet (need 3+ per pattern).
+        {below.length > 0 && ` ${below.length} pattern${below.length !== 1 ? "s" : ""} with 1–2 occurrences (no claim).`}
         <div className="text-neutral-500 mt-2">
-          Patterns are deterministic counts from tagged rallies. Claims require minimum sample size.
+          Patterns are deterministic counts from tagged rallies. Claims require minimum sample size (5).
         </div>
       </div>
     );
@@ -928,70 +931,138 @@ function PredictabilityTable({ patterns, confidence }) {
     <>
       <div className="mb-2 flex items-center gap-2 flex-wrap">
         <ConfidenceChip confidence={confidence} />
-        {directional > 0 && (
+        {directional.length > 0 && (
+          <span className="text-[11px] text-amber-300">
+            +{directional.length} directional-only pattern{directional.length !== 1 ? "s" : ""} (3–4 occurrences)
+          </span>
+        )}
+        {below.length > 0 && (
           <span className="text-[11px] text-neutral-500">
-            +{directional} below-threshold pattern{directional !== 1 ? "s" : ""}
+            +{below.length} below threshold (≤ 2)
           </span>
         )}
       </div>
-      <div className="overflow-x-auto">
-        <table className="w-full text-[11px] border-collapse">
-          <thead>
-            <tr className="bg-neutral-800 text-neutral-300 print:bg-neutral-200 print:text-black">
-              <Th>Incoming pattern</Th>
-              <Th>Top response</Th>
-              <Th>Frequency</Th>
-              <Th>Win %</Th>
-              <Th>UE %</Th>
-              <Th>Classification</Th>
-              <Th>Evidence</Th>
-            </tr>
-          </thead>
-          <tbody>
-            {major.map((p) => (
-              <tr key={p.stimulusKey} className="bg-neutral-900 print:bg-white border-b border-neutral-800 print:border-neutral-300 align-top">
-                <Td className="font-mono text-neutral-200 whitespace-nowrap print:text-black">
-                  {p.stimulusLabel}
-                </Td>
-                <Td className="font-mono text-neutral-300 print:text-black">
-                  {p.topResponse
-                    ? `Son ${p.topResponse.responseGrip || "?"}-${p.topResponse.responseShotType}-${p.topResponse.responseDirection || "?"} to Z${p.topResponse.responseTargetZone}`
-                    : "—"}
-                </Td>
-                <Td className="font-mono tabular-nums">
-                  {p.topResponse ? `${p.topResponse.count}/${p.total}` : "—"}
-                  <span className="text-neutral-500 ml-1">({p.topResponsePct}%)</span>
-                </Td>
-                <Td className={`font-mono tabular-nums ${p.topResponseWinPct >= 60 ? "text-emerald-400" : p.topResponseWinPct <= 40 ? "text-red-400" : ""}`}>
-                  {p.topResponseWinPct}%
-                </Td>
-                <Td className={`font-mono tabular-nums ${p.topResponseUePct >= 25 ? "text-red-400" : ""}`}>
-                  {p.topResponseUePct}%
-                </Td>
-                <Td>
-                  <div className="flex flex-wrap gap-1">
-                    {p.classifications.map((c) => <ClassChip key={c} label={c} />)}
-                  </div>
-                  {p.alternativeRecommendation && (
-                    <div className="text-[10px] text-amber-300 mt-1 leading-snug print:text-black">
-                      ↻ Alt response wins {p.alternativeRecommendation.altWinPct}% (Δ +{p.alternativeRecommendation.deltaPct}pp). Consider varying.
-                    </div>
-                  )}
-                </Td>
-                <Td className="text-[10px] text-neutral-500 max-w-[16rem] truncate print:max-w-none print:whitespace-normal print:text-black">
-                  {p.evidence
-                    .map((e) => `${e.matchId} R${e.rallyIndex}${e.score ? ` @ ${e.score}` : ""}`)
-                    .join(", ")}
-                </Td>
+
+      {/* Main table — major patterns (>= 5) */}
+      {major.length > 0 ? (
+        <div className="overflow-x-auto">
+          <table className="w-full text-[11px] border-collapse">
+            <thead>
+              <tr className="bg-neutral-800 text-neutral-300 print:bg-neutral-200 print:text-black">
+                <Th>Incoming pattern</Th>
+                <Th>Top response</Th>
+                <Th>Frequency</Th>
+                <Th>Win %</Th>
+                <Th>UE %</Th>
+                <Th>Classification</Th>
+                <Th>Evidence</Th>
               </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+            </thead>
+            <tbody>
+              {major.map((p) => <PatternRow key={p.stimulusKey} p={p} />)}
+            </tbody>
+          </table>
+        </div>
+      ) : (
+        <div className="bg-neutral-900 border border-neutral-800 rounded-md p-3 text-xs text-neutral-400 print:border-neutral-400 print:bg-white">
+          No pattern reaches the 5-occurrence threshold yet — see directional table below.
+        </div>
+      )}
+
+      {/* Compact directional section — total 3 or 4 only */}
+      {directional.length > 0 && (
+        <div className="mt-3">
+          <div className="text-[11px] uppercase tracking-wider font-semibold text-amber-400 mb-1.5 print:text-black">
+            Directional only / low sample (3–4 occurrences)
+          </div>
+          <div className="overflow-x-auto bg-amber-950/20 border border-amber-900/40 rounded-md print:bg-amber-50 print:border-amber-300">
+            <table className="w-full text-[11px] border-collapse">
+              <thead>
+                <tr className="bg-amber-950/40 text-amber-200 print:bg-amber-100 print:text-black">
+                  <Th>Incoming</Th>
+                  <Th>Top response</Th>
+                  <Th>Freq</Th>
+                  <Th>Win %</Th>
+                  <Th>Evidence</Th>
+                </tr>
+              </thead>
+              <tbody>
+                {directional.map((p) => (
+                  <tr key={p.stimulusKey} className="border-b border-amber-900/30 print:border-amber-200 align-top">
+                    <Td className="font-mono text-amber-200 whitespace-nowrap print:text-black">
+                      {p.stimulusLabel}
+                    </Td>
+                    <Td className="font-mono text-amber-100/90 print:text-black">
+                      {p.topResponse
+                        ? `Son ${p.topResponse.responseGrip || "?"}-${p.topResponse.responseShotType}-${p.topResponse.responseDirection || "?"} to Z${p.topResponse.responseTargetZone}`
+                        : "—"}
+                    </Td>
+                    <Td className="font-mono tabular-nums">
+                      {p.topResponse?.count ?? 0}/{p.total} <span className="text-amber-300/70">({p.topResponsePct}%)</span>
+                    </Td>
+                    <Td className="font-mono tabular-nums">{p.topResponseWinPct}%</Td>
+                    <Td className="text-[10px] text-amber-300/80 max-w-[16rem] truncate print:text-black print:max-w-none print:whitespace-normal">
+                      {p.evidence
+                        .map((e) => `${e.matchId} R${e.rallyIndex}${e.score ? ` @ ${e.score}` : ""}`)
+                        .join(", ")}
+                    </Td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <div className="text-[10px] text-amber-300/80 mt-1 print:text-black">
+            Sample sizes 3–4 — surfaced for awareness only. Don&apos;t form coaching prescriptions from these rows.
+          </div>
+        </div>
+      )}
+
       <div className="text-[11px] text-neutral-500 mt-2 leading-relaxed">
         Patterns are deterministic counts from tagged rallies. Claims require minimum sample size (5).
       </div>
     </>
+  );
+}
+
+// Single row for the major pattern table — kept inline so PatternRow shares
+// styling rules with the directional table without duplicating the logic.
+function PatternRow({ p }) {
+  return (
+    <tr className="bg-neutral-900 print:bg-white border-b border-neutral-800 print:border-neutral-300 align-top">
+      <Td className="font-mono text-neutral-200 whitespace-nowrap print:text-black">
+        {p.stimulusLabel}
+      </Td>
+      <Td className="font-mono text-neutral-300 print:text-black">
+        {p.topResponse
+          ? `Son ${p.topResponse.responseGrip || "?"}-${p.topResponse.responseShotType}-${p.topResponse.responseDirection || "?"} to Z${p.topResponse.responseTargetZone}`
+          : "—"}
+      </Td>
+      <Td className="font-mono tabular-nums">
+        {p.topResponse ? `${p.topResponse.count}/${p.total}` : "—"}
+        <span className="text-neutral-500 ml-1">({p.topResponsePct}%)</span>
+      </Td>
+      <Td className={`font-mono tabular-nums ${p.topResponseWinPct >= 60 ? "text-emerald-400" : p.topResponseWinPct <= 40 ? "text-red-400" : ""}`}>
+        {p.topResponseWinPct}%
+      </Td>
+      <Td className={`font-mono tabular-nums ${p.topResponseUePct >= 25 ? "text-red-400" : ""}`}>
+        {p.topResponseUePct}%
+      </Td>
+      <Td>
+        <div className="flex flex-wrap gap-1">
+          {p.classifications.map((c) => <ClassChip key={c} label={c} />)}
+        </div>
+        {p.alternativeRecommendation && (
+          <div className="text-[10px] text-amber-300 mt-1 leading-snug print:text-black">
+            ↻ Alt response wins {p.alternativeRecommendation.altWinPct}% (Δ +{p.alternativeRecommendation.deltaPct}pp). Consider varying.
+          </div>
+        )}
+      </Td>
+      <Td className="text-[10px] text-neutral-500 max-w-[16rem] truncate print:max-w-none print:whitespace-normal print:text-black">
+        {p.evidence
+          .map((e) => `${e.matchId} R${e.rallyIndex}${e.score ? ` @ ${e.score}` : ""}`)
+          .join(", ")}
+      </Td>
+    </tr>
   );
 }
 
