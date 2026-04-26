@@ -144,4 +144,45 @@ describe("deriveShotContext", () => {
     expect(deriveShotContext(rally({ shots: [] }), 0)).toBe(null);
     expect(deriveShotContext(null, 0)).toBe(null);
   });
+
+  // Phase-7 / pattern-mining additions —
+  it("populates previousShot, nextShot, and previousOpponentShot fields", () => {
+    const r = rally({
+      server: "S",
+      shots: [
+        shot({ shotType: "LS", zone: 2 }),
+        shot({ shotType: "LF", zone: 8 }),
+        shot({ shotType: "SM", zone: 9 }),
+      ],
+    });
+    const ctx = deriveShotContext(r, 1); // opp shot
+    expect(ctx.previousShot?.shotType).toBe("LS");
+    expect(ctx.nextShot?.shotType).toBe("SM");
+    // shot[1] was hit by opp → its previousOpponentShot is null (prior was Son).
+    expect(ctx.previousOpponentShot).toBe(null);
+  });
+
+  it("does NOT infer Son origin for opponent shots", () => {
+    const r = rally({
+      server: "S",
+      shots: [shot({ shotType: "LS", zone: 2 }), shot({ shotType: "DR", zone: 5 })],
+    });
+    const ctx = deriveShotContext(r, 1); // opp shot
+    expect(ctx.hitBy).toBe("O");
+    expect(ctx.inferredOriginZone).toBe(null);
+    expect(ctx.originZoneSource).toBe("not_inferred_for_opponent");
+  });
+
+  it("exposes shotType / grip / dir / score / phase passthroughs", () => {
+    const r = rally({
+      server: "S",
+      score: "10-8",
+      phase: "Mid",
+      shots: [shot({ shotType: "LS", grip: null, dir: null, zone: 2 })],
+    });
+    const ctx = deriveShotContext(r, 0);
+    expect(ctx.shotType).toBe("LS");
+    expect(ctx.score).toBe("10-8");
+    expect(ctx.phase).toBe("Mid");
+  });
 });

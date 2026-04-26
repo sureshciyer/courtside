@@ -38,6 +38,12 @@ describe("performanceReportMarkdown", () => {
     const md = performanceReportMarkdown([buildMatch()]);
     expect(md).toMatch(/Hold\/delay deception is not tracked/);
   });
+
+  it("includes the Predictability & response patterns section", () => {
+    const md = performanceReportMarkdown([buildMatch()]);
+    expect(md).toMatch(/Predictability & response patterns/i);
+    expect(md).toMatch(/Patterns are deterministic counts/i);
+  });
 });
 
 describe("matchAnalysisMarkdown", () => {

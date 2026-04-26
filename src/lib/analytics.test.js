@@ -36,6 +36,7 @@ import {
   killChainSetups,
   analyzeKillChains,
   generateTrainingPlan,
+  analyzeResponsePredictability,
 } from "./analytics.js";
 import { rally, shot, match, wonRally, lostRally } from "./__fixtures__.js";
 
@@ -1126,6 +1127,209 @@ describe("generateTrainingPlan (Phase 10)", () => {
     const plan = generateTrainingPlan([match({ rallies })]);
     const ue = plan.find((p) => p.id === "reduce_ue");
     expect(ue.severity).toBe("critical");
+  });
+});
+
+describe("analyzeResponsePredictability (Phase: pattern mining)", () => {
+  // Helper — single match that contains the supplied list of rallies.
+  const matchOf = (rallies, overrides = {}) =>
+    match({ id: "M001", tournament: "Tour A", opponent: "Opp X", rallies, ...overrides });
+
+  // Build a rally where Opp serves a stimulus then Son responds. By default
+  // the rally outcome is Son winning the point.
+  //   stim   = { shotType, zone }
+  //   resp   = { shotType, grip, dir, zone, quality }
+  //   outcome = { pointWonBy, result, score }
+  const stimulusRally = (stim, resp, outcome = {}) => rally({
+    server: "O",
+    matchId: "M001",
+    set: 1,
+    score: outcome.score ?? "5-5",
+    phase: outcome.phase ?? "Mid",
+    pointWonBy: outcome.pointWonBy ?? "S",
+    result: outcome.result ?? "W",
+    shots: [
+      shot({ shotType: stim.shotType, zone: stim.zone }),
+      shot({
+        shotType: resp.shotType,
+        grip: resp.grip ?? "F",
+        dir: resp.dir ?? "ST",
+        zone: resp.zone,
+        quality: resp.quality,
+      }),
+    ],
+  });
+
+  it("groups Son responses by stimulus key and computes top response %", () => {
+    // 5 stimuli "Opp NT to Z3", Son responds "F-LF-CR to Z9" 4 times, "F-LF-ST to Z9" once.
+    const rallies = [
+      ...Array(4).fill(0).map(() =>
+        stimulusRally({ shotType: "NT", zone: 3 }, { shotType: "LF", grip: "F", dir: "CR", zone: 9 }),
+      ),
+      stimulusRally({ shotType: "NT", zone: 3 }, { shotType: "LF", grip: "F", dir: "ST", zone: 9 }),
+    ];
+    const out = analyzeResponsePredictability([matchOf(rallies)]);
+    expect(out).toHaveLength(1);
+    const p = out[0];
+    expect(p.stimulusLabel).toBe("Opp NT to Z3");
+    expect(p.total).toBe(5);
+    expect(p.topResponse.responseShotType).toBe("LF");
+    expect(p.topResponse.responseDirection).toBe("CR");
+    expect(p.topResponsePct).toBe(80);
+  });
+
+  it("classifies a >=75% top response as strong_predictability", () => {
+    const rallies = Array(8).fill(0).map(() =>
+      stimulusRally({ shotType: "CL", zone: 7 }, { shotType: "DR", grip: "F", dir: "CR", zone: 3 }),
+    );
+    const out = analyzeResponsePredictability([matchOf(rallies)]);
+    expect(out[0].classifications).toContain("strong_predictability");
+  });
+
+  it("classifies high win rate + low UE as a weapon", () => {
+    // 6 stimuli, Son wins all → 100% win, 0% UE → weapon
+    const rallies = Array(6).fill(0).map(() =>
+      stimulusRally(
+        { shotType: "CL", zone: 7 }, { shotType: "DR", grip: "F", dir: "CR", zone: 3 },
+        { pointWonBy: "S", result: "W" },
+      ),
+    );
+    const out = analyzeResponsePredictability([matchOf(rallies)]);
+    expect(out[0].classifications).toContain("weapon");
+  });
+
+  it("classifies low win rate or high UE as a liability", () => {
+    // 6 stimuli, all UE losses → 0% win, 100% UE → liability
+    const rallies = Array(6).fill(0).map(() =>
+      stimulusRally(
+        { shotType: "NT", zone: 3 }, { shotType: "LF", grip: "F", dir: "CR", zone: 9 },
+        { pointWonBy: "O", result: "UE" },
+      ),
+    );
+    const out = analyzeResponsePredictability([matchOf(rallies)]);
+    expect(out[0].classifications).toContain("liability");
+  });
+
+  it("flags directional_only and hides from major when sample < 5", () => {
+    const rallies = Array(3).fill(0).map(() =>
+      stimulusRally({ shotType: "NT", zone: 3 }, { shotType: "LF", grip: "F", dir: "CR", zone: 9 }),
+    );
+    const out = analyzeResponsePredictability([matchOf(rallies)]);
+    expect(out[0].classifications).toContain("directional_only");
+  });
+
+  it("each pattern carries an evidence list with matchId, set, rallyIndex, score, sequenceText", () => {
+    const rallies = Array(5).fill(0).map(() =>
+      stimulusRally({ shotType: "NT", zone: 3 }, { shotType: "LF", grip: "F", dir: "CR", zone: 9 }),
+    );
+    const out = analyzeResponsePredictability([matchOf(rallies)]);
+    const ev = out[0].evidence[0];
+    expect(ev.matchId).toBe("M001");
+    expect(ev.tournamentName).toBe("Tour A");
+    expect(ev.opponent).toBe("Opp X");
+    expect(ev.set).toBe(1);
+    expect(typeof ev.rallyIndex).toBe("number");
+    expect(ev.sequenceText).toMatch(/Opp NT-Z3 → Son F-LF-CR-Z9/);
+  });
+
+  it("clutch filter keeps only rallies at score >=16", () => {
+    const rallies = [
+      ...Array(4).fill(0).map(() =>
+        stimulusRally(
+          { shotType: "NT", zone: 3 }, { shotType: "LF", grip: "F", dir: "CR", zone: 9 },
+          { score: "5-5", phase: "Early" },
+        ),
+      ),
+      ...Array(5).fill(0).map(() =>
+        stimulusRally(
+          { shotType: "NT", zone: 3 }, { shotType: "LF", grip: "F", dir: "CR", zone: 9 },
+          { score: "18-16", phase: "Clutch" },
+        ),
+      ),
+    ];
+    const all = analyzeResponsePredictability([matchOf(rallies)]);
+    expect(all[0].total).toBe(9);
+    const clutchOnly = analyzeResponsePredictability([matchOf(rallies)], { phase: "clutch" });
+    expect(clutchOnly[0].total).toBe(5);
+  });
+
+  it("after_lost_point filter keeps only rallies after a lost point", () => {
+    // Order matters — rallies are walked in array order.
+    const losingRally = rally({
+      matchId: "M001",
+      server: "S",
+      pointWonBy: "O",
+      result: "UE",
+      shots: [shot({ shotType: "LS", zone: 2 }), shot({ shotType: "DR", zone: 5 })],
+    });
+    const winningRally = rally({
+      matchId: "M001",
+      server: "S",
+      pointWonBy: "S",
+      result: "W",
+      shots: [shot({ shotType: "LS", zone: 2 }), shot({ shotType: "DR", zone: 5 })],
+    });
+    // 5 stimulus rallies all preceded by losing rallies → should pass
+    const goodSet = [];
+    for (let i = 0; i < 5; i++) {
+      goodSet.push(losingRally);
+      goodSet.push(stimulusRally({ shotType: "NT", zone: 3 }, { shotType: "LF", grip: "F", dir: "CR", zone: 9 }));
+    }
+    // ... and 5 stimulus rallies preceded by *winning* rallies → should NOT pass
+    const skippedSet = [];
+    for (let i = 0; i < 5; i++) {
+      skippedSet.push(winningRally);
+      skippedSet.push(stimulusRally({ shotType: "NT", zone: 3 }, { shotType: "LF", grip: "F", dir: "CR", zone: 9 }));
+    }
+    const out = analyzeResponsePredictability(
+      [matchOf([...goodSet, ...skippedSet])],
+      { phase: "after_lost_point" },
+    );
+    expect(out[0].total).toBe(5);
+  });
+
+  it("recommends a less-used response when it outperforms the top response by ≥20pp", () => {
+    // Top: F-LF-CR-Z9 (count 6, all losses → 0% win)
+    // Alt: F-DR-CR-Z3 (count 3, all wins → 100% win)
+    const rallies = [
+      ...Array(6).fill(0).map(() =>
+        stimulusRally(
+          { shotType: "NT", zone: 3 }, { shotType: "LF", grip: "F", dir: "CR", zone: 9 },
+          { pointWonBy: "O", result: "UE" },
+        ),
+      ),
+      ...Array(3).fill(0).map(() =>
+        stimulusRally(
+          { shotType: "NT", zone: 3 }, { shotType: "DR", grip: "F", dir: "CR", zone: 3 },
+          { pointWonBy: "S", result: "W" },
+        ),
+      ),
+    ];
+    const out = analyzeResponsePredictability([matchOf(rallies)]);
+    expect(out[0].alternativeRecommendation).not.toBeNull();
+    expect(out[0].alternativeRecommendation.deltaPct).toBeGreaterThanOrEqual(20);
+  });
+
+  it("only counts Son responses (skips opponent-played responses)", () => {
+    // Son serves; opp returns; Son hits a 3rd shot. The Son shot at index 2
+    // is the response to opp's shot at index 1. Index 1 is NOT a Son
+    // response and must be ignored.
+    const r = rally({
+      server: "S",
+      matchId: "M001",
+      pointWonBy: "S",
+      result: "W",
+      shots: [
+        shot({ shotType: "LS", zone: 2 }),
+        shot({ shotType: "DR", grip: "F", dir: "CR", zone: 5, quality: "Effective" }),
+        shot({ shotType: "SM", grip: "F", dir: "ST", zone: 9 }),
+      ],
+    });
+    const out = analyzeResponsePredictability([matchOf([r, r, r, r, r])]);
+    // Stimulus is opp's return (DR to Z5). Son's response is the 3rd shot SM to Z9.
+    expect(out[0].stimulusLabel).toBe("Opp DR to Z5");
+    expect(out[0].topResponse.responseShotType).toBe("SM");
+    expect(out[0].total).toBe(5);
   });
 });
 

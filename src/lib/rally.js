@@ -171,6 +171,11 @@ const sonPerspectiveQuality = (hitBy, q) => {
 // analytics ask "where was Son when he hit?" and "what was the opponent's
 // previous shot?" without needing those fields to be explicitly captured.
 //
+// Origin inference is gated to *Son shots only* — zones are recorded from
+// Son's court perspective, so Son's standing position equals the previous
+// opponent shot's landing zone. We do not attempt to infer opponent
+// standing positions from this perspective.
+//
 // Future-proofing: if a shot ever carries an explicit `originZone`, that
 // capture wins and `originZoneSource` becomes "captured".
 export const deriveShotContext = (rally, shotIndex) => {
@@ -179,31 +184,35 @@ export const deriveShotContext = (rally, shotIndex) => {
 
   const hitBy = shotHitter(rally, shotIndex);
   const prev = shotIndex > 0 ? rally.shots[shotIndex - 1] : null;
+  const next = rally?.shots?.[shotIndex + 1] || null;
   const prevHitBy = shotIndex > 0 ? shotHitter(rally, shotIndex - 1) : null;
 
-  // Origin inference. shots[0] is a serve — origin is the service court,
-  // which we represent as null + a "serve" source so callers can branch.
+  // Previous opponent shot is the *opponent's* prior shot from Son's
+  // perspective. Only meaningful when the *current* shot is Son's; for an
+  // opponent shot we leave it null so consumers don't accidentally treat
+  // a Son shot as an "opponent" shot.
+  const previousOpponentShot =
+    hitBy === "S" && prev && prevHitBy === "O" ? prev : null;
+
+  // Origin inference (Son only).
   let inferredOriginZone = null;
   let originZoneSource = "unknown";
   if (shot.originZone != null) {
     inferredOriginZone = shot.originZone;
     originZoneSource = "captured";
-  } else if (shotIndex === 0) {
+  } else if (hitBy === "S") {
+    if (shotIndex === 0) {
+      inferredOriginZone = null;
+      originZoneSource = "serve";
+    } else if (previousOpponentShot?.zone != null) {
+      inferredOriginZone = previousOpponentShot.zone;
+      originZoneSource = "derived_from_previous_opponent_shot";
+    }
+  } else {
+    // Opponent shot — perspective convention means we don't infer opp
+    // origin from prior shots. Caller can still see `previousShot`.
     inferredOriginZone = null;
-    originZoneSource = "serve";
-  } else if (prev?.zone != null) {
-    inferredOriginZone = prev.zone;
-    originZoneSource = "derived_from_previous_opponent_shot";
-  }
-
-  // Previous opponent shot is only populated when the prior shot was hit
-  // by the *other* player. In a strictly alternating rally that's always
-  // true if hitBy is well-defined and prev exists, but we guard explicitly.
-  let previousOpponentShotType = null;
-  let previousOpponentShotZone = null;
-  if (prev && prevHitBy && prevHitBy !== hitBy) {
-    previousOpponentShotType = prev.shotType ?? null;
-    previousOpponentShotZone = prev.zone ?? null;
+    originZoneSource = "not_inferred_for_opponent";
   }
 
   const bodySide =
@@ -215,13 +224,21 @@ export const deriveShotContext = (rally, shotIndex) => {
 
   return {
     hitBy,
+    shotType: shot.shotType ?? null,
+    grip: shot.grip ?? null,
+    dir: shot.dir ?? null,
     targetZone: shot.zone ?? null,
-    inferredOriginZone,
-    originZoneSource,
-    previousOpponentShotType,
-    previousOpponentShotZone,
-    bodySide,
     qualityFromHitterPerspective: q,
     qualityForSonPerspective: sonPerspectiveQuality(hitBy, q),
+    score: rally?.score ?? null,
+    phase: rally?.phase ?? null,
+    previousShot: prev,
+    nextShot: next,
+    previousOpponentShot,
+    previousOpponentShotType: previousOpponentShot?.shotType ?? null,
+    previousOpponentShotZone: previousOpponentShot?.zone ?? null,
+    bodySide,
+    inferredOriginZone,
+    originZoneSource,
   };
 };

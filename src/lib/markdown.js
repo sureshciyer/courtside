@@ -224,6 +224,9 @@ export const matchAnalysisMarkdown = (match, { playerName = "Player" } = {}) => 
     md += P("_Not enough data to generate recommendations._");
   }
 
+  // Predictability & response patterns
+  md += predictabilityMarkdown(bundle.predictability);
+
   // AI critique
   md += H2("🧠 AI critique");
   md += P(match.aiInsights?.trim() || "_Paste Claude / Gemini tactical analysis here, then re-export._");
@@ -822,11 +825,74 @@ export const performanceReportMarkdown = (matches, { playerName = "Player", scop
     md += P("_Not enough data to generate recommendations._");
   }
 
+  // Predictability & response patterns
+  md += predictabilityMarkdown(bundle.predictability);
+
   // Raw payload
   md += H2("📦 Raw data for LLM analysis");
   md += P("Trimmed match list — paste into Claude/Gemini for follow-up analysis.");
   md += codeBlock(JSON.stringify(matches, null, 2));
 
+  return md;
+};
+
+// Predictability & response-pattern table — same shape as the on-screen
+// section, hides directional_only patterns, surfaces alt-response notes.
+const predictabilityMarkdown = (patterns) => {
+  let md = H2("🎯 Predictability & response patterns");
+  if (!patterns || patterns.length === 0) {
+    md += P("_No qualifying stimulus → response samples yet._");
+    md += P("_Patterns are deterministic counts from tagged rallies. Claims require minimum sample size._");
+    return md;
+  }
+  const major = patterns.filter((p) => !p.classifications.includes("directional_only"));
+  const directional = patterns.length - major.length;
+
+  if (major.length === 0) {
+    md += P(
+      `_No pattern reaches the 5-occurrence threshold yet — ${directional} ` +
+      `directional-only pattern${directional !== 1 ? "s" : ""} below threshold._`,
+    );
+    md += P("_Patterns are deterministic counts from tagged rallies. Claims require minimum sample size._");
+    return md;
+  }
+
+  md += table(
+    ["Incoming pattern", "Top response", "Frequency", "Win %", "UE %", "Classification", "Evidence"],
+    major.map((p) => [
+      p.stimulusLabel,
+      p.topResponse
+        ? `Son ${p.topResponse.responseGrip || "?"}-${p.topResponse.responseShotType}-${p.topResponse.responseDirection || "?"} to Z${p.topResponse.responseTargetZone}`
+        : "—",
+      p.topResponse ? `${p.topResponse.count}/${p.total} (${p.topResponsePct}%)` : "—",
+      `${p.topResponseWinPct}%`,
+      `${p.topResponseUePct}%`,
+      p.classifications.map((c) => `\`${c}\``).join(" "),
+      p.evidence
+        .map((e) => `${e.matchId} R${e.rallyIndex}${e.score ? ` @ ${e.score}` : ""}`)
+        .join(", "),
+    ]),
+  );
+
+  // Surface alt-response recommendations as bullets after the table.
+  const withAlt = major.filter((p) => p.alternativeRecommendation);
+  if (withAlt.length) {
+    md += H3("Alternative-response recommendations");
+    md += withAlt
+      .map(
+        (p) =>
+          `- **${p.stimulusLabel}** — ${p.alternativeRecommendation.note} ` +
+          `Alt wins ${p.alternativeRecommendation.altWinPct}%, ` +
+          `top wins ${p.alternativeRecommendation.topWinPct}% ` +
+          `(Δ +${p.alternativeRecommendation.deltaPct}pp).`,
+      )
+      .join("\n") + "\n\n";
+  }
+
+  if (directional > 0) {
+    md += P(`_${directional} additional pattern${directional !== 1 ? "s" : ""} below 5-occurrence threshold (directional only, hidden)._`);
+  }
+  md += P("_Patterns are deterministic counts from tagged rallies. Claims require minimum sample size._");
   return md;
 };
 

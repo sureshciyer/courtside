@@ -94,7 +94,7 @@ export default function Report({ setScreen }) {
   const { agg, tournaments, distribution, lengthProfile, bestLengthBucket, serveReturn,
           clutch, fatigue, deception, effectiveness,
           winnerZones, errorZonesAll, allZones, recs, advanced, confidence,
-          leaks, serveThirdShot, zoneWeakness, trainingPlan } = bundle;
+          leaks, serveThirdShot, zoneWeakness, trainingPlan, predictability } = bundle;
   const wonMatches = matches.filter((m) => {
     const setsWon = m.sets.filter((s) => s.sonScore > s.oppScore).length;
     return setsWon > m.sets.length / 2;
@@ -214,6 +214,7 @@ export default function Report({ setScreen }) {
             ["a9", "9. Predictability & deception"],
             ["a10", "10. Tactical cleverness"],
             ["a11", "11. Coaching recommendations"],
+            ["a12", "12. Predictability & response patterns"],
           ]} onNav={scrollTo} />
           <TocSection label="Part B: Drill-down" items={[
             ...tournaments.map((t, i) => ["t" + i, t.name]),
@@ -488,6 +489,10 @@ export default function Report({ setScreen }) {
           {recs.map((r, i) => <RecBox key={i} {...r} />)}
         </div>
       )}
+
+      {/* 12. Predictability & response patterns */}
+      <SH id="a12" n="12" t="Predictability & response patterns" />
+      <PredictabilityTable patterns={predictability} confidence={confidence} />
 
       {/* ===================== PART B ===================== */}
       <PartHeader label="B" title="Tournament drill-down" />
@@ -893,6 +898,119 @@ function ProLevelFindings({
       </span>
     );
   }
+}
+
+// ===================================================================
+//                  PREDICTABILITY & RESPONSE PATTERNS
+//  Deterministic counts: per (Opp shotType+zone) stimulus, what's Son's
+//  most-common response, how often does it work, and is a less-used
+//  alternative outperforming it?
+// ===================================================================
+function PredictabilityTable({ patterns, confidence }) {
+  // Hide the directional_only patterns from the main table — surface
+  // them only as a count line so the report doesn't overclaim.
+  const major = patterns.filter((p) => !p.classifications.includes("directional_only"));
+  const directional = patterns.length - major.length;
+
+  if (major.length === 0) {
+    return (
+      <div className="bg-neutral-900 border border-neutral-800 rounded-lg p-4 text-xs text-neutral-400 leading-relaxed print:border-neutral-400 print:bg-white">
+        Not enough qualifying stimulus → response samples yet (need 5+ per pattern).
+        {directional > 0 && ` ${directional} pattern${directional !== 1 ? "s" : ""} below sample threshold (directional only).`}
+        <div className="text-neutral-500 mt-2">
+          Patterns are deterministic counts from tagged rallies. Claims require minimum sample size.
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <>
+      <div className="mb-2 flex items-center gap-2 flex-wrap">
+        <ConfidenceChip confidence={confidence} />
+        {directional > 0 && (
+          <span className="text-[11px] text-neutral-500">
+            +{directional} below-threshold pattern{directional !== 1 ? "s" : ""}
+          </span>
+        )}
+      </div>
+      <div className="overflow-x-auto">
+        <table className="w-full text-[11px] border-collapse">
+          <thead>
+            <tr className="bg-neutral-800 text-neutral-300 print:bg-neutral-200 print:text-black">
+              <Th>Incoming pattern</Th>
+              <Th>Top response</Th>
+              <Th>Frequency</Th>
+              <Th>Win %</Th>
+              <Th>UE %</Th>
+              <Th>Classification</Th>
+              <Th>Evidence</Th>
+            </tr>
+          </thead>
+          <tbody>
+            {major.map((p) => (
+              <tr key={p.stimulusKey} className="bg-neutral-900 print:bg-white border-b border-neutral-800 print:border-neutral-300 align-top">
+                <Td className="font-mono text-neutral-200 whitespace-nowrap print:text-black">
+                  {p.stimulusLabel}
+                </Td>
+                <Td className="font-mono text-neutral-300 print:text-black">
+                  {p.topResponse
+                    ? `Son ${p.topResponse.responseGrip || "?"}-${p.topResponse.responseShotType}-${p.topResponse.responseDirection || "?"} to Z${p.topResponse.responseTargetZone}`
+                    : "—"}
+                </Td>
+                <Td className="font-mono tabular-nums">
+                  {p.topResponse ? `${p.topResponse.count}/${p.total}` : "—"}
+                  <span className="text-neutral-500 ml-1">({p.topResponsePct}%)</span>
+                </Td>
+                <Td className={`font-mono tabular-nums ${p.topResponseWinPct >= 60 ? "text-emerald-400" : p.topResponseWinPct <= 40 ? "text-red-400" : ""}`}>
+                  {p.topResponseWinPct}%
+                </Td>
+                <Td className={`font-mono tabular-nums ${p.topResponseUePct >= 25 ? "text-red-400" : ""}`}>
+                  {p.topResponseUePct}%
+                </Td>
+                <Td>
+                  <div className="flex flex-wrap gap-1">
+                    {p.classifications.map((c) => <ClassChip key={c} label={c} />)}
+                  </div>
+                  {p.alternativeRecommendation && (
+                    <div className="text-[10px] text-amber-300 mt-1 leading-snug print:text-black">
+                      ↻ Alt response wins {p.alternativeRecommendation.altWinPct}% (Δ +{p.alternativeRecommendation.deltaPct}pp). Consider varying.
+                    </div>
+                  )}
+                </Td>
+                <Td className="text-[10px] text-neutral-500 max-w-[16rem] truncate print:max-w-none print:whitespace-normal print:text-black">
+                  {p.evidence
+                    .map((e) => `${e.matchId} R${e.rallyIndex}${e.score ? ` @ ${e.score}` : ""}`)
+                    .join(", ")}
+                </Td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <div className="text-[11px] text-neutral-500 mt-2 leading-relaxed">
+        Patterns are deterministic counts from tagged rallies. Claims require minimum sample size (5).
+      </div>
+    </>
+  );
+}
+
+const CLASS_CHIP_TONE = {
+  strong_predictability:   "bg-amber-950/60 text-amber-300 border-amber-800/70",
+  moderate_predictability: "bg-amber-950/40 text-amber-300 border-amber-900/60",
+  weapon:                  "bg-emerald-950/60 text-emerald-300 border-emerald-800/70",
+  liability:               "bg-red-950/60 text-red-300 border-red-800/70",
+  directional_only:        "bg-neutral-800 text-neutral-400 border-neutral-700",
+};
+
+function ClassChip({ label }) {
+  const tone = CLASS_CHIP_TONE[label] || CLASS_CHIP_TONE.directional_only;
+  const text = label.replace(/_/g, " ");
+  return (
+    <span className={`px-1.5 py-0.5 rounded border text-[9px] font-bold uppercase tracking-wider ${tone} print:bg-white print:text-black print:border-neutral-400`}>
+      {text}
+    </span>
+  );
 }
 
 function FindingCard({ n, title, children }) {

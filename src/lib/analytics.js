@@ -2,7 +2,7 @@
 // No React, no store — everything here consumes the plain `matches` array.
 
 import { DISRUPTION_SHOTS, SHOT_NAMES } from "../constants/badminton.js";
-import { deriveShotContext } from "./rally.js";
+import { deriveShotContext, shotHitter } from "./rally.js";
 import {
   BENCHMARKS,
   PATTERN_MIN_COUNT,
@@ -830,6 +830,7 @@ export const reportBundle = (matches) => {
     serveThirdShot: serveThirdShotTable(rallies),
     zoneWeakness: analyzeZoneWeakness(rallies),
     trainingPlan: generateTrainingPlan(matches),
+    predictability: analyzeResponsePredictability(matches),
   };
 };
 
@@ -972,6 +973,219 @@ export const analyzeZoneWeakness = (rallies) => {
     originSourceMix,
     finding,
   };
+};
+
+// ===================================================================
+//  RESPONSE PREDICTABILITY (pattern mining)
+//
+//  For every Son shot that follows an Opponent shot, build:
+//    stimulusKey = `<oppShotType>-Z<oppZone>`
+//    responseKey = `<grip>-<shotType>-<dir>-Z<zone>`  (Son's response)
+//
+//  Group events by stimulus, compute response distribution, win/UE rates
+//  per response, classify the dominant response, and surface alternative
+//  response recommendations when the most-common response underperforms a
+//  less-used option.
+//
+//  Pure deterministic counts — no LLM, no extrapolation. Sample-size
+//  gating built in (5 minimum to surface as a major insight).
+//
+//  Phase filter: { phase: "all" | "clutch" | "leading" | "trailing" |
+//                          "after_lost_point" }
+// ===================================================================
+
+const RESP_KEY = (s) =>
+  `${s.grip || "?"}-${s.shotType || "?"}-${s.dir || "?"}-Z${s.zone ?? "?"}`;
+
+// Format a stimulus / response into a readable, terse string.
+const formatStimulus = (oppShot) =>
+  `Opp ${oppShot.shotType}-Z${oppShot.zone}`;
+const formatResponse = (sonShot) =>
+  `Son ${sonShot.grip || "?"}-${sonShot.shotType}-${sonShot.dir || "?"}-Z${sonShot.zone}`;
+
+// Whether a rally satisfies the requested pressure phase. `prevRally` is
+// the rally captured immediately before `r` in the same dataset (used for
+// "after_lost_point").
+const matchPhaseFilter = (r, prevRally, phase) => {
+  if (!phase || phase === "all") return true;
+  const [son, opp] = (r.score || "0-0").split("-").map((n) => Number(n) || 0);
+  if (phase === "clutch") return Math.max(son, opp) >= 16;
+  if (phase === "leading") return son > opp;
+  if (phase === "trailing") return son < opp;
+  if (phase === "after_lost_point") return prevRally?.pointWonBy === "O";
+  return true;
+};
+
+// Classify a stimulus group given its top-response stats.
+const classifyPredictability = ({ total, topPct, topWinPct, topUePct }) => {
+  const labels = [];
+  if (total < 5) {
+    labels.push("directional_only");
+    return labels;
+  }
+  if (topPct >= 75) labels.push("strong_predictability");
+  else if (topPct >= 60) labels.push("moderate_predictability");
+  if (topWinPct >= 60 && topUePct <= 15) labels.push("weapon");
+  if (topWinPct <= 40 || topUePct >= 25) labels.push("liability");
+  return labels;
+};
+
+// Build the alternative-response recommendation for a stimulus. If a less-
+// used option (count >= 3) outperforms the top response by >= 20 pp on
+// win rate, return a recommendation; else null.
+const computeAlternativeRecommendation = (responses) => {
+  if (!responses || responses.length < 2) return null;
+  const top = responses[0];
+  for (let i = 1; i < Math.min(3, responses.length); i++) {
+    const alt = responses[i];
+    if (alt.count < 3) continue;
+    if (alt.winPct - top.winPct >= 20) {
+      return {
+        altResponseKey: alt.responseKey,
+        altWinPct: alt.winPct,
+        altUePct: alt.uePct,
+        altCount: alt.count,
+        topWinPct: top.winPct,
+        deltaPct: alt.winPct - top.winPct,
+        note: "Consider varying response; less-used option is outperforming the predictable response.",
+      };
+    }
+  }
+  return null;
+};
+
+export const analyzeResponsePredictability = (matches, options = {}) => {
+  const { phase = "all", maxEvidence = 5 } = options;
+
+  // Look-up table for evidence enrichment (tournament + opponent).
+  const matchById = new Map();
+  for (const m of matches || []) matchById.set(m.id, m);
+
+  // Walk all rallies in order so "after_lost_point" can read the prior
+  // rally outcome. Rallies inside one match are already in capture order.
+  const allRallies = (matches || []).flatMap((m) => m.rallies || []);
+
+  const groups = new Map();
+  let prevRally = null;
+  for (let rIdx = 0; rIdx < allRallies.length; rIdx++) {
+    const r = allRallies[rIdx];
+    if (!matchPhaseFilter(r, prevRally, phase)) {
+      prevRally = r;
+      continue;
+    }
+
+    const shots = r.shots || [];
+    for (let i = 1; i < shots.length; i++) {
+      if (shotHitter(r, i) !== "S") continue;
+      const son = shots[i];
+      const prev = shots[i - 1];
+      // Stimulus + response need both shotType + zone.
+      if (!prev?.shotType || prev.zone == null) continue;
+      if (!son?.shotType || son.zone == null) continue;
+
+      const stimulusKey = `${prev.shotType}-Z${prev.zone}`;
+      const responseKey = RESP_KEY(son);
+
+      if (!groups.has(stimulusKey)) {
+        groups.set(stimulusKey, {
+          stimulusKey,
+          incomingShotType: prev.shotType,
+          incomingZone: prev.zone,
+          events: [],
+        });
+      }
+      const g = groups.get(stimulusKey);
+      const m = matchById.get(r.matchId);
+      g.events.push({
+        responseKey,
+        responseShotType: son.shotType,
+        responseGrip: son.grip,
+        responseDirection: son.dir,
+        responseTargetZone: son.zone,
+        responseQuality: son.quality,
+        rallyResult: r.result,
+        sonWonRally: r.pointWonBy === "S",
+        sonUE: r.result === "UE" && r.pointWonBy === "O",
+        score: r.score,
+        clutch: r.phase === "Clutch",
+        evidence: {
+          matchId: r.matchId,
+          tournamentName: m?.tournament || null,
+          opponent: m?.opponent || null,
+          set: r.set,
+          rallyIndex: rIdx,
+          score: r.score,
+          sequenceText: `${formatStimulus(prev)} → ${formatResponse(son)}`,
+          pointWonBy: r.pointWonBy,
+          result: r.result,
+        },
+      });
+    }
+    prevRally = r;
+  }
+
+  // Build patterns from groups.
+  const patterns = [];
+  for (const g of groups.values()) {
+    const total = g.events.length;
+    const dist = new Map();
+    for (const e of g.events) {
+      if (!dist.has(e.responseKey)) {
+        dist.set(e.responseKey, {
+          responseKey: e.responseKey,
+          responseShotType: e.responseShotType,
+          responseGrip: e.responseGrip,
+          responseDirection: e.responseDirection,
+          responseTargetZone: e.responseTargetZone,
+          count: 0,
+          wins: 0,
+          ues: 0,
+        });
+      }
+      const d = dist.get(e.responseKey);
+      d.count++;
+      if (e.sonWonRally) d.wins++;
+      if (e.sonUE) d.ues++;
+    }
+    const responses = [...dist.values()]
+      .map((d) => ({
+        ...d,
+        frequencyPct: pct(d.count, total),
+        winPct: pct(d.wins, d.count),
+        uePct: pct(d.ues, d.count),
+      }))
+      .sort((a, b) => b.count - a.count || a.responseKey.localeCompare(b.responseKey));
+
+    const topResponse = responses[0];
+    const topPct = topResponse ? pct(topResponse.count, total) : 0;
+    const classifications = classifyPredictability({
+      total,
+      topPct,
+      topWinPct: topResponse?.winPct ?? 0,
+      topUePct: topResponse?.uePct ?? 0,
+    });
+
+    // First N events become evidence.
+    const evidence = g.events.slice(0, maxEvidence).map((e) => e.evidence);
+
+    patterns.push({
+      stimulusKey: g.stimulusKey,
+      stimulusLabel: `Opp ${g.incomingShotType} to Z${g.incomingZone}`,
+      incomingShotType: g.incomingShotType,
+      incomingZone: g.incomingZone,
+      total,
+      responses,
+      topResponse,
+      topResponsePct: topPct,
+      topResponseWinPct: topResponse?.winPct ?? 0,
+      topResponseUePct: topResponse?.uePct ?? 0,
+      classifications,
+      alternativeRecommendation: computeAlternativeRecommendation(responses),
+      evidence,
+    });
+  }
+
+  return patterns.sort((a, b) => b.total - a.total);
 };
 
 // ===================================================================
