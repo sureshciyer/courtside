@@ -10,6 +10,25 @@ describe("performanceReportMarkdown", () => {
     ],
   });
 
+  const stimulusRally = (stim, resp, outcome = {}) => rally({
+    server: "O",
+    matchId: "M001",
+    set: 1,
+    score: outcome.score ?? "5-5",
+    phase: outcome.phase ?? "Mid",
+    pointWonBy: outcome.pointWonBy ?? "S",
+    result: outcome.result ?? "W",
+    shots: [
+      shot({ shotType: stim.shotType, zone: stim.zone }),
+      shot({
+        shotType: resp.shotType,
+        grip: resp.grip ?? "F",
+        dir: resp.dir ?? "ST",
+        zone: resp.zone,
+      }),
+    ],
+  });
+
   it("returns the no-data placeholder when matches is empty", () => {
     expect(performanceReportMarkdown([])).toMatch(/No matches in scope/);
   });
@@ -43,6 +62,31 @@ describe("performanceReportMarkdown", () => {
     const md = performanceReportMarkdown([buildMatch()]);
     expect(md).toMatch(/Predictability & response patterns/i);
     expect(md).toMatch(/Patterns are deterministic counts/i);
+  });
+
+  it("exports pressure-phase predictability comparison and insights", () => {
+    const stim = { shotType: "CL", zone: 7 };
+    const rallies = [
+      ...Array(6).fill(0).map(() =>
+        stimulusRally(stim, { shotType: "DR", grip: "F", dir: "CR", zone: 3 }, { score: "18-18", phase: "Clutch" }),
+      ),
+      stimulusRally(stim, { shotType: "CL", grip: "F", dir: "ST", zone: 7 }, { score: "18-18", phase: "Clutch" }),
+      stimulusRally(stim, { shotType: "LF", grip: "F", dir: "ST", zone: 9 }, { score: "18-18", phase: "Clutch" }),
+      ...Array(3).fill(0).map(() =>
+        stimulusRally(stim, { shotType: "DR", grip: "F", dir: "CR", zone: 3 }),
+      ),
+      ...Array(5).fill(0).map(() =>
+        stimulusRally(stim, { shotType: "CL", grip: "F", dir: "ST", zone: 7 }),
+      ),
+      ...Array(4).fill(0).map(() =>
+        stimulusRally(stim, { shotType: "LF", grip: "F", dir: "ST", zone: 9 }),
+      ),
+    ];
+
+    const md = performanceReportMarkdown([match({ rallies })]);
+    expect(md).toMatch(/Pressure-phase predictability comparison/);
+    expect(md).toMatch(/Clutch \+30pp/);
+    expect(md).toMatch(/In clutch points, Son becomes more predictable from Z7/);
   });
 });
 

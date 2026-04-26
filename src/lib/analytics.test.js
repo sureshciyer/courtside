@@ -37,6 +37,7 @@ import {
   analyzeKillChains,
   generateTrainingPlan,
   analyzeResponsePredictability,
+  analyzePressurePredictability,
 } from "./analytics.js";
 import { rally, shot, match, wonRally, lostRally } from "./__fixtures__.js";
 
@@ -1184,6 +1185,71 @@ describe("analyzeResponsePredictability (Phase: pattern mining)", () => {
     );
     const out = analyzeResponsePredictability([matchOf(rallies)]);
     expect(out[0].classifications).toContain("strong_predictability");
+  });
+
+  it("compares all-points top frequency against clutch, leading, trailing, and after-lost phases", () => {
+    const stim = { shotType: "CL", zone: 7 };
+    const crossDrop = { shotType: "DR", grip: "F", dir: "CR", zone: 3 };
+    const straightClear = { shotType: "CL", grip: "F", dir: "ST", zone: 7 };
+    const straightLift = { shotType: "LF", grip: "F", dir: "ST", zone: 9 };
+    const rallies = [
+      ...Array(6).fill(0).map(() => stimulusRally(stim, crossDrop, { score: "18-18", phase: "Clutch" })),
+      stimulusRally(stim, straightClear, { score: "18-18", phase: "Clutch" }),
+      stimulusRally(stim, straightLift, { score: "18-18", phase: "Clutch" }),
+      ...Array(3).fill(0).map(() => stimulusRally(stim, crossDrop, { score: "5-5", phase: "Early" })),
+      ...Array(5).fill(0).map(() => stimulusRally(stim, straightClear, { score: "8-8", phase: "Mid" })),
+      ...Array(4).fill(0).map(() => stimulusRally(stim, straightLift, { score: "12-12", phase: "Mid" })),
+    ];
+
+    const [row] = analyzePressurePredictability([matchOf(rallies)]);
+    expect(row.stimulusKey).toBe("CL-Z7");
+    expect(row.phases.all.topResponsePct).toBe(45);
+    expect(row.phases.clutch.topResponsePct).toBe(75);
+    expect(row.phases.leading.total).toBe(0);
+    expect(row.phases.trailing.total).toBe(0);
+    expect(row.phases.after_lost_point.total).toBe(0);
+    expect(row.pressureFlags[0].phase).toBe("clutch");
+    expect(row.pressureFlags[0].deltaPct).toBe(30);
+    expect(row.insight).toMatch(/In clutch points/);
+    expect(row.insight).toMatch(/cross drop to Z3/);
+  });
+
+  it("flags after-lost-point predictability when it jumps by at least 15pp", () => {
+    const losingRally = rally({
+      matchId: "M001",
+      server: "S",
+      pointWonBy: "O",
+      result: "UE",
+      shots: [shot({ shotType: "LS", zone: 2 }), shot({ shotType: "DR", zone: 5 })],
+    });
+    const winningRally = rally({
+      matchId: "M001",
+      server: "S",
+      pointWonBy: "S",
+      result: "W",
+      shots: [shot({ shotType: "LS", zone: 2 }), shot({ shotType: "DR", zone: 5 })],
+    });
+    const afterLoss = [];
+    for (let i = 0; i < 5; i++) {
+      afterLoss.push(losingRally);
+      afterLoss.push(stimulusRally(
+        { shotType: "CL", zone: 7 },
+        { shotType: "DR", grip: "F", dir: "CR", zone: 3 },
+      ));
+    }
+    const afterWin = [];
+    for (let i = 0; i < 5; i++) {
+      afterWin.push(winningRally);
+      afterWin.push(stimulusRally(
+        { shotType: "CL", zone: 7 },
+        { shotType: "CL", grip: "F", dir: "ST", zone: 7 },
+      ));
+    }
+
+    const [row] = analyzePressurePredictability([matchOf([...afterLoss, ...afterWin])]);
+    expect(row.phases.all.topResponsePct).toBe(50);
+    expect(row.phases.after_lost_point.topResponsePct).toBe(100);
+    expect(row.pressureFlags.some((f) => f.phase === "after_lost_point")).toBe(true);
   });
 
   it("classifies high win rate + low UE as a weapon", () => {

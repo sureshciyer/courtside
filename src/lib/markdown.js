@@ -225,7 +225,7 @@ export const matchAnalysisMarkdown = (match, { playerName = "Player" } = {}) => 
   }
 
   // Predictability & response patterns
-  md += predictabilityMarkdown(bundle.predictability);
+  md += predictabilityMarkdown(bundle.predictability, bundle.pressurePredictability);
 
   // AI critique
   md += H2("🧠 AI critique");
@@ -826,7 +826,7 @@ export const performanceReportMarkdown = (matches, { playerName = "Player", scop
   }
 
   // Predictability & response patterns
-  md += predictabilityMarkdown(bundle.predictability);
+  md += predictabilityMarkdown(bundle.predictability, bundle.pressurePredictability);
 
   // Raw payload
   md += H2("📦 Raw data for LLM analysis");
@@ -839,7 +839,7 @@ export const performanceReportMarkdown = (matches, { playerName = "Player", scop
 // Predictability & response-pattern table. Same shape as the on-screen
 // section: main table for total >= 5, compact "directional only" section
 // for total 3–4, and just a count for total <= 2.
-const predictabilityMarkdown = (patterns) => {
+const predictabilityMarkdown = (patterns, pressureComparisons = []) => {
   let md = H2("🎯 Predictability & response patterns");
   if (!patterns || patterns.length === 0) {
     md += P("_No qualifying stimulus → response samples yet._");
@@ -850,6 +850,15 @@ const predictabilityMarkdown = (patterns) => {
   const major = patterns.filter((p) => p.total >= 5);
   const directional = patterns.filter((p) => p.total === 3 || p.total === 4);
   const below = patterns.filter((p) => p.total > 0 && p.total < 3);
+  const majorKeys = new Set(major.map((p) => p.stimulusKey));
+  const pressureRows = (pressureComparisons || [])
+    .filter((c) => majorKeys.has(c.stimulusKey))
+    .sort(
+      (a, b) =>
+        Number(b.pressurePredictability) - Number(a.pressurePredictability) ||
+        b.maxPressureDelta - a.maxPressureDelta ||
+        b.phases.all.total - a.phases.all.total,
+    );
 
   const renderRow = (p) => [
     p.stimulusLabel,
@@ -897,6 +906,47 @@ const predictabilityMarkdown = (patterns) => {
     }
   } else {
     md += P("_No pattern reaches the 5-occurrence threshold yet — see directional-only section below._");
+  }
+
+  if (pressureRows.length > 0) {
+    const phaseCell = (summary) => {
+      if (!summary || summary.total === 0) return "—";
+      const response = summary.topResponse
+        ? `Son ${summary.topResponse.responseGrip || "?"}-${summary.topResponse.responseShotType}-${summary.topResponse.responseDirection || "?"} to Z${summary.topResponse.responseTargetZone}`
+        : "—";
+      const delta =
+        summary.phase !== "all" && summary.deltaFromAll !== 0
+          ? ` (${summary.deltaFromAll > 0 ? "+" : ""}${summary.deltaFromAll}pp)`
+          : "";
+      return `${summary.topResponsePct}% (${summary.topResponseCount}/${summary.total}) ${response}${delta}`;
+    };
+
+    md += H3("Pressure-phase predictability comparison");
+    md += table(
+      ["Incoming", "All", "Clutch", "Leading", "Trailing", "After lost", "Flag"],
+      pressureRows.map((c) => [
+        c.stimulusLabel,
+        phaseCell(c.phases.all),
+        phaseCell(c.phases.clutch),
+        phaseCell(c.phases.leading),
+        phaseCell(c.phases.trailing),
+        phaseCell(c.phases.after_lost_point),
+        c.pressureFlags.length
+          ? c.pressureFlags
+              .map((f) => `${f.phaseLabel} +${f.deltaPct}pp${f.lowSample ? " (directional sample)" : ""}`)
+              .join("; ")
+          : "—",
+      ]),
+    );
+
+    const flagged = pressureRows.filter((c) => c.pressurePredictability);
+    if (flagged.length > 0) {
+      md += H3("Pressure predictability insights");
+      md += flagged
+        .flatMap((c) => c.pressureFlags.map((f) => `- **${c.stimulusLabel}** — ${f.insight}`))
+        .join("\n") + "\n\n";
+    }
+    md += P("_Pressure flags trigger at +15pp versus all-points frequency. Phase samples under 5 are directional._");
   }
 
   // Directional section — total 3 or 4

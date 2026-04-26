@@ -94,7 +94,8 @@ export default function Report({ setScreen }) {
   const { agg, tournaments, distribution, lengthProfile, bestLengthBucket, serveReturn,
           clutch, fatigue, deception, effectiveness,
           winnerZones, errorZonesAll, allZones, recs, advanced, confidence,
-          leaks, serveThirdShot, zoneWeakness, trainingPlan, predictability } = bundle;
+          leaks, serveThirdShot, zoneWeakness, trainingPlan,
+          predictability, pressurePredictability } = bundle;
   const wonMatches = matches.filter((m) => {
     const setsWon = m.sets.filter((s) => s.sonScore > s.oppScore).length;
     return setsWon > m.sets.length / 2;
@@ -492,7 +493,11 @@ export default function Report({ setScreen }) {
 
       {/* 12. Predictability & response patterns */}
       <SH id="a12" n="12" t="Predictability & response patterns" />
-      <PredictabilityTable patterns={predictability} confidence={confidence} />
+      <PredictabilityTable
+        patterns={predictability}
+        pressureComparisons={pressurePredictability}
+        confidence={confidence}
+      />
 
       {/* ===================== PART B ===================== */}
       <PartHeader label="B" title="Tournament drill-down" />
@@ -906,7 +911,7 @@ function ProLevelFindings({
 //  most-common response, how often does it work, and is a less-used
 //  alternative outperforming it?
 // ===================================================================
-function PredictabilityTable({ patterns, confidence }) {
+function PredictabilityTable({ patterns, pressureComparisons = [], confidence }) {
   // Split by sample size:
   //   major     = total >= 5  → main table, claims allowed
   //   directional = total 3–4 → compact secondary section, "directional only"
@@ -914,6 +919,15 @@ function PredictabilityTable({ patterns, confidence }) {
   const major = patterns.filter((p) => p.total >= 5);
   const directional = patterns.filter((p) => p.total === 3 || p.total === 4);
   const below = patterns.filter((p) => p.total > 0 && p.total < 3);
+  const majorKeys = new Set(major.map((p) => p.stimulusKey));
+  const pressureRows = (pressureComparisons || [])
+    .filter((c) => majorKeys.has(c.stimulusKey))
+    .sort(
+      (a, b) =>
+        Number(b.pressurePredictability) - Number(a.pressurePredictability) ||
+        b.maxPressureDelta - a.maxPressureDelta ||
+        b.phases.all.total - a.phases.all.total,
+    );
 
   if (major.length === 0 && directional.length === 0) {
     return (
@@ -966,6 +980,36 @@ function PredictabilityTable({ patterns, confidence }) {
       ) : (
         <div className="bg-neutral-900 border border-neutral-800 rounded-md p-3 text-xs text-neutral-400 print:border-neutral-400 print:bg-white">
           No pattern reaches the 5-occurrence threshold yet — see directional table below.
+        </div>
+      )}
+
+      {/* Pressure-phase comparison — all-points baseline vs score/state subsets */}
+      {pressureRows.length > 0 && (
+        <div className="mt-3">
+          <div className="text-[11px] uppercase tracking-wider font-semibold text-emerald-400 mb-1.5 print:text-black">
+            Pressure-phase comparison
+          </div>
+          <div className="overflow-x-auto bg-neutral-950/70 border border-neutral-800 rounded-md print:bg-white print:border-neutral-400">
+            <table className="w-full text-[11px] border-collapse">
+              <thead>
+                <tr className="bg-neutral-800 text-neutral-300 print:bg-neutral-200 print:text-black">
+                  <Th>Incoming</Th>
+                  <Th>All</Th>
+                  <Th>Clutch</Th>
+                  <Th>Leading</Th>
+                  <Th>Trailing</Th>
+                  <Th>After lost</Th>
+                  <Th>Flag</Th>
+                </tr>
+              </thead>
+              <tbody>
+                {pressureRows.map((c) => <PressureComparisonRow key={c.stimulusKey} comparison={c} />)}
+              </tbody>
+            </table>
+          </div>
+          <div className="text-[10px] text-neutral-500 mt-1 print:text-black">
+            Pressure flags trigger at +15pp versus all-points frequency. Phase samples under 5 are directional.
+          </div>
         </div>
       )}
 
@@ -1024,6 +1068,80 @@ function PredictabilityTable({ patterns, confidence }) {
   );
 }
 
+function PressureComparisonRow({ comparison }) {
+  const flags = comparison.pressureFlags || [];
+  return (
+    <tr className={`border-b border-neutral-800 print:border-neutral-300 align-top ${comparison.pressurePredictability ? "bg-amber-950/20 print:bg-amber-50" : "bg-neutral-900 print:bg-white"}`}>
+      <Td className="font-mono text-neutral-200 whitespace-nowrap print:text-black">
+        {comparison.stimulusLabel}
+      </Td>
+      <Td><PhaseCell summary={comparison.phases.all} /></Td>
+      <Td><PhaseCell summary={comparison.phases.clutch} /></Td>
+      <Td><PhaseCell summary={comparison.phases.leading} /></Td>
+      <Td><PhaseCell summary={comparison.phases.trailing} /></Td>
+      <Td><PhaseCell summary={comparison.phases.after_lost_point} /></Td>
+      <Td className="min-w-[14rem]">
+        {flags.length > 0 ? (
+          <div className="space-y-1">
+            {flags.map((flag) => (
+              <div key={flag.phase}>
+                <div className="flex flex-wrap items-center gap-1">
+                  <ClassChip label="pressure_predictability" />
+                  <span className="font-mono tabular-nums text-amber-300 print:text-black">
+                    {flag.phaseLabel} +{flag.deltaPct}pp
+                  </span>
+                  {flag.lowSample && (
+                    <span className="text-[9px] uppercase tracking-wider text-neutral-500 print:text-black">
+                      directional
+                    </span>
+                  )}
+                </div>
+                <div className="text-[10px] text-amber-200/90 leading-snug mt-0.5 print:text-black">
+                  {flag.insight}
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <span className="text-neutral-600 print:text-black">—</span>
+        )}
+      </Td>
+    </tr>
+  );
+}
+
+function PhaseCell({ summary }) {
+  if (!summary || summary.total === 0) {
+    return <span className="text-neutral-600 print:text-black">—</span>;
+  }
+  const delta = summary.phase !== "all" ? summary.deltaFromAll : null;
+  return (
+    <div className="font-mono tabular-nums leading-tight">
+      <div className="text-neutral-200 print:text-black">
+        {summary.topResponsePct}%
+        <span className="text-neutral-500 ml-1">({summary.topResponseCount}/{summary.total})</span>
+      </div>
+      <div className="text-[10px] text-neutral-500 whitespace-nowrap print:text-black">
+        {shortResponse(summary.topResponse)}
+      </div>
+      {delta !== null && delta !== 0 && (
+        <div className={`text-[10px] ${delta >= 15 ? "text-amber-300" : delta > 0 ? "text-neutral-300" : "text-neutral-500"} print:text-black`}>
+          {delta > 0 ? "+" : ""}{delta}pp
+        </div>
+      )}
+    </div>
+  );
+}
+
+function shortResponse(response) {
+  if (!response) return "—";
+  const grip = response.responseGrip || "?";
+  const shot = response.responseShotType || "?";
+  const dir = response.responseDirection || "?";
+  const zone = response.responseTargetZone ?? "?";
+  return `${grip}-${shot}-${dir} to Z${zone}`;
+}
+
 // Single row for the major pattern table — kept inline so PatternRow shares
 // styling rules with the directional table without duplicating the logic.
 function PatternRow({ p }) {
@@ -1071,6 +1189,7 @@ const CLASS_CHIP_TONE = {
   moderate_predictability: "bg-amber-950/40 text-amber-300 border-amber-900/60",
   weapon:                  "bg-emerald-950/60 text-emerald-300 border-emerald-800/70",
   liability:               "bg-red-950/60 text-red-300 border-red-800/70",
+  pressure_predictability:  "bg-amber-950/70 text-amber-200 border-amber-700/80",
   directional_only:        "bg-neutral-800 text-neutral-400 border-neutral-700",
 };
 

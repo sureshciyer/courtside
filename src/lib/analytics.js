@@ -815,6 +815,7 @@ export const reportBundle = (matches) => {
   const rallies = matches.flatMap((m) => m.rallies);
   const agg = setAggregate(rallies); // reuse — the numbers roll up cleanly
   const style = classifyStyle(agg.shots);
+  const predictability = analyzeResponsePredictability(matches);
   return {
     matches,
     rallies,
@@ -839,7 +840,8 @@ export const reportBundle = (matches) => {
     serveThirdShot: serveThirdShotTable(rallies),
     zoneWeakness: analyzeZoneWeakness(rallies),
     trainingPlan: generateTrainingPlan(matches),
-    predictability: analyzeResponsePredictability(matches),
+    predictability,
+    pressurePredictability: analyzePressurePredictability(matches, { allPatterns: predictability }),
   };
 };
 
@@ -1003,6 +1005,18 @@ export const analyzeZoneWeakness = (rallies) => {
 //                          "after_lost_point" }
 // ===================================================================
 
+const RESPONSE_PATTERN_MAJOR_MIN = 5;
+const PRESSURE_PREDICTABILITY_DELTA_PP = 15;
+const PRESSURE_PHASES = ["all", "clutch", "leading", "trailing", "after_lost_point"];
+const PRESSURE_PHASE_LABELS = {
+  all: "All points",
+  clutch: "Clutch",
+  leading: "Leading",
+  trailing: "Trailing",
+  after_lost_point: "After lost point",
+};
+const DIR_NAMES = { ST: "straight", CR: "cross", BD: "body" };
+
 const RESP_KEY = (s) =>
   `${s.grip || "?"}-${s.shotType || "?"}-${s.dir || "?"}-Z${s.zone ?? "?"}`;
 
@@ -1011,6 +1025,38 @@ const formatStimulus = (oppShot) =>
   `Opp ${oppShot.shotType}-Z${oppShot.zone}`;
 const formatResponse = (sonShot) =>
   `Son ${sonShot.grip || "?"}-${sonShot.shotType}-${sonShot.dir || "?"}-Z${sonShot.zone}`;
+
+const pressureResponsePhrase = (response) => {
+  if (!response) return "that response";
+  const direction = DIR_NAMES[response.responseDirection];
+  const shot = (SHOT_NAMES[response.responseShotType] || response.responseShotType || "shot").toLowerCase();
+  const target = response.responseTargetZone != null ? ` to Z${response.responseTargetZone}` : "";
+  return `${[direction, shot].filter(Boolean).join(" ")}${target}`;
+};
+
+const summarizePressurePhase = (pattern, phase) => ({
+  phase,
+  phaseLabel: PRESSURE_PHASE_LABELS[phase],
+  total: pattern?.total ?? 0,
+  topResponse: pattern?.topResponse ?? null,
+  topResponseKey: pattern?.topResponse?.responseKey ?? null,
+  topResponseCount: pattern?.topResponse?.count ?? 0,
+  topResponsePct: pattern?.topResponsePct ?? 0,
+  topResponseWinPct: pattern?.topResponseWinPct ?? 0,
+  topResponseUePct: pattern?.topResponseUePct ?? 0,
+  evidence: pattern?.evidence ?? [],
+});
+
+const pressurePredictabilityInsight = ({ phase, phasePct, allPct, deltaPct, incomingZone, response }) => {
+  const opener = phase === "after_lost_point"
+    ? "After losing the previous point"
+    : "In clutch points";
+  return (
+    `${opener}, Son becomes more predictable from Z${incomingZone}, ` +
+    `relying on ${pressureResponsePhrase(response)} more often ` +
+    `(${phasePct}% vs ${allPct}% all points, +${deltaPct}pp).`
+  );
+};
 
 // Whether a rally satisfies the requested pressure phase.
 //
@@ -1034,7 +1080,7 @@ const matchPhaseFilter = (r, prevRally, phase) => {
 // Classify a stimulus group given its top-response stats.
 const classifyPredictability = ({ total, topPct, topWinPct, topUePct }) => {
   const labels = [];
-  if (total < 5) {
+  if (total < RESPONSE_PATTERN_MAJOR_MIN) {
     labels.push("directional_only");
     return labels;
   }
@@ -1205,6 +1251,96 @@ export const analyzeResponsePredictability = (matches, options = {}) => {
   }
 
   return patterns.sort((a, b) => b.total - a.total);
+};
+
+export const analyzePressurePredictability = (matches, options = {}) => {
+  const {
+    allPatterns = null,
+    maxEvidence = 5,
+    deltaThreshold = PRESSURE_PREDICTABILITY_DELTA_PP,
+  } = options;
+
+  const phasePatterns = {
+    all: allPatterns ?? analyzeResponsePredictability(matches, { phase: "all", maxEvidence }),
+  };
+  for (const phase of PRESSURE_PHASES) {
+    if (phase === "all") continue;
+    phasePatterns[phase] = analyzeResponsePredictability(matches, { phase, maxEvidence });
+  }
+
+  const byPhase = {};
+  for (const phase of PRESSURE_PHASES) {
+    byPhase[phase] = new Map((phasePatterns[phase] || []).map((p) => [p.stimulusKey, p]));
+  }
+
+  const comparisons = [];
+  for (const allPattern of phasePatterns.all || []) {
+    const phases = {};
+    for (const phase of PRESSURE_PHASES) {
+      phases[phase] = summarizePressurePhase(byPhase[phase].get(allPattern.stimulusKey), phase);
+    }
+
+    const allPct = phases.all.topResponsePct;
+    for (const phase of PRESSURE_PHASES) {
+      phases[phase].deltaFromAll = phases[phase].topResponsePct - allPct;
+    }
+
+    const pressureFlags = ["clutch", "after_lost_point"]
+      .map((phase) => {
+        const phaseSummary = phases[phase];
+        if (phaseSummary.total === 0 || phases.all.total === 0) return null;
+        const deltaPct = phaseSummary.topResponsePct - allPct;
+        if (deltaPct < deltaThreshold) return null;
+        return {
+          phase,
+          phaseLabel: PRESSURE_PHASE_LABELS[phase],
+          allPct,
+          phasePct: phaseSummary.topResponsePct,
+          deltaPct,
+          allCount: phases.all.topResponseCount,
+          allTotal: phases.all.total,
+          phaseCount: phaseSummary.topResponseCount,
+          phaseTotal: phaseSummary.total,
+          response: phaseSummary.topResponse,
+          responseKey: phaseSummary.topResponseKey,
+          sameAsAllTop: phaseSummary.topResponseKey === phases.all.topResponseKey,
+          lowSample:
+            phaseSummary.total < RESPONSE_PATTERN_MAJOR_MIN ||
+            phases.all.total < RESPONSE_PATTERN_MAJOR_MIN,
+          insight: pressurePredictabilityInsight({
+            phase,
+            phasePct: phaseSummary.topResponsePct,
+            allPct,
+            deltaPct,
+            incomingZone: allPattern.incomingZone,
+            response: phaseSummary.topResponse,
+          }),
+        };
+      })
+      .filter(Boolean);
+
+    comparisons.push({
+      stimulusKey: allPattern.stimulusKey,
+      stimulusLabel: allPattern.stimulusLabel,
+      incomingShotType: allPattern.incomingShotType,
+      incomingZone: allPattern.incomingZone,
+      phases,
+      pressurePredictability: pressureFlags.length > 0,
+      pressureFlags,
+      maxPressureDelta: pressureFlags.length
+        ? Math.max(...pressureFlags.map((f) => f.deltaPct))
+        : Math.max(phases.clutch.deltaFromAll, phases.after_lost_point.deltaFromAll),
+      insight: pressureFlags[0]?.insight ?? null,
+    });
+  }
+
+  return comparisons.sort(
+    (a, b) =>
+      Number(b.pressurePredictability) - Number(a.pressurePredictability) ||
+      b.maxPressureDelta - a.maxPressureDelta ||
+      b.phases.all.total - a.phases.all.total ||
+      a.stimulusKey.localeCompare(b.stimulusKey),
+  );
 };
 
 // ===================================================================
