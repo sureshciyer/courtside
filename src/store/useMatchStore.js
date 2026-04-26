@@ -35,7 +35,11 @@ const normalizeOpponent = (name) => (name || "").trim().toLowerCase();
  *   matches[] is the completed-match archive (End match moves here).
  */
 
-const buildShot = ({ grip, shotType, dir, zone, role, quality }, position, startedAt) => ({
+const buildShot = (
+  { grip, shotType, dir, zone, role, quality, deceptionType },
+  position,
+  startedAt,
+) => ({
   grip: grip ?? null,
   shotType,
   dir: dir ?? null,
@@ -43,6 +47,9 @@ const buildShot = ({ grip, shotType, dir, zone, role, quality }, position, start
   code: grip && dir ? `${grip}-${shotType}-${dir}` : shotType,
   role: role || autoRole(position, shotType),
   quality: quality ?? null,
+  // Optional deception tagging (Phase 5). "none" is the default; analytics
+  // ignores "none"/missing/"unknown" when computing the deception index.
+  deceptionType: deceptionType || "none",
   timestamp: startedAt ? +((Date.now() - startedAt) / 1000).toFixed(2) : 0,
 });
 
@@ -308,6 +315,13 @@ export const useMatchStore = create(
         set((state) => {
           const r = state.currentRally; if (!r) return {};
           const shots = r.shots.map((s, i) => (i === index ? { ...s, quality } : s));
+          return { currentRally: { ...r, shots } };
+        }),
+
+      setShotDeception: (index, deceptionType) =>
+        set((state) => {
+          const r = state.currentRally; if (!r) return {};
+          const shots = r.shots.map((s, i) => (i === index ? { ...s, deceptionType } : s));
           return { currentRally: { ...r, shots } };
         }),
 

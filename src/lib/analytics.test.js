@@ -364,6 +364,30 @@ describe("deceptionStats (Phase 5 — HS is not a hold)", () => {
     expect(out).toHaveProperty("holds");
     expect(out).toHaveProperty("slices");
   });
+
+  it("treats deceptionType='none' from the capture picker as not deceptive", () => {
+    const m = match({
+      rallies: [rally({ shots: [
+        shot({ shotType: "CL", deceptionType: "none" }),
+        shot({ shotType: "DR", deceptionType: "none" }),
+      ]})],
+    });
+    const out = deceptionStats([m]);
+    expect(out.trackedDeception).toBe(0);
+    expect(out.hasAdvancedTagging).toBe(false);
+  });
+
+  it("flips advanced tagging on once a single 'hold' or 'disguised' is captured", () => {
+    const m = match({
+      rallies: [rally({ shots: [
+        shot({ shotType: "CL", deceptionType: "none" }),
+        shot({ shotType: "DR", deceptionType: "hold" }),
+      ]})],
+    });
+    const out = deceptionStats([m]);
+    expect(out.holds).toBe(1);
+    expect(out.hasAdvancedTagging).toBe(true);
+  });
 });
 
 describe("zoneTallies", () => {

@@ -14,6 +14,7 @@ import Timeline from "../components/capture/Timeline.jsx";
 import CourtGrid from "../components/capture/CourtGrid.jsx";
 import ShotPalette from "../components/capture/ShotPalette.jsx";
 import QualityToggle from "../components/capture/QualityToggle.jsx";
+import DeceptionToggle from "../components/capture/DeceptionToggle.jsx";
 import ServerPicker from "../components/capture/ServerPicker.jsx";
 import ResultBar from "../components/capture/ResultBar.jsx";
 import RallyLogSheet from "../components/capture/RallyLogSheet.jsx";
@@ -30,6 +31,7 @@ export default function Capture({ setScreen }) {
   const deleteShot = useMatchStore((s) => s.deleteShot);
   const popShot = useMatchStore((s) => s.popShot);
   const setShotQuality = useMatchStore((s) => s.setShotQuality);
+  const setShotDeception = useMatchStore((s) => s.setShotDeception);
   const finishRally = useMatchStore((s) => s.finishRally);
   const restartRally = useMatchStore((s) => s.restartRally);
   const nextSet = useMatchStore((s) => s.nextSet);
@@ -39,6 +41,7 @@ export default function Capture({ setScreen }) {
   // --- local UI state (transient; not persisted) ---
   const [armedShot, setArmedShot] = useState(null);     // shot type waiting for a zone
   const [quality, setQuality] = useState("Neutral");    // default quality for the next commit
+  const [deception, setDeception] = useState("none");   // default deception tag for the next commit (resets after each commit)
   const [direction, setDirection] = useState("ST");     // sticky direction for the next commit
   const [dirOverridden, setDirOverridden] = useState(false); // user manually touched direction during the current arm
   const [focusedIdx, setFocusedIdx] = useState(null);
@@ -81,11 +84,15 @@ export default function Capture({ setScreen }) {
       zone,
       role: isServeShot ? "opening" : autoRole(rally.shots.length, shotType),
       quality,
+      deceptionType: deception,
     });
     // Reset arm state; carry direction forward as the new sticky default.
+    // Deception is *not* sticky — most shots aren't deceptive, so we reset
+    // each commit to avoid silently tagging unrelated shots.
     setArmedShot(null);
     setDirOverridden(false);
     if (shotDir) setDirection(shotDir);
+    setDeception("none");
     if (finishAfter) {
       setFinishAfter(false);
       setShowResult(true);
@@ -145,6 +152,15 @@ export default function Capture({ setScreen }) {
     }
   };
 
+  const handleDeceptionChange = (dt) => {
+    if (isEditing) {
+      setShotDeception(focusedIdx, dt);
+      flash(`Decep → ${dt === "none" ? "—" : dt}`);
+    } else {
+      setDeception(dt);
+    }
+  };
+
   const handleCycleGrip = (i) => {
     const s = rally.shots[i];
     if (SERVE_CODES.has(s.shotType)) return;
@@ -185,6 +201,7 @@ export default function Capture({ setScreen }) {
     setFinishAfter(false);
     setDirection("ST");
     setDirOverridden(false);
+    setDeception("none");
     flash("Rally saved");
   };
 
@@ -196,6 +213,7 @@ export default function Capture({ setScreen }) {
     setFinishAfter(false);
     setDirection("ST");
     setDirOverridden(false);
+    setDeception("none");
   };
 
   const handleEndMatch = () => { endMatch(); setScreen("summary"); };
@@ -208,6 +226,7 @@ export default function Capture({ setScreen }) {
   // ---------- render ----------
   const serverPicker = !rally.server && rally.shots.length === 0;
   const focusedQuality = focused?.quality || "Neutral";
+  const focusedDeception = focused?.deceptionType || "none";
   const displayDirection = isEditing ? (focused.dir || "ST") : direction;
 
   return (
@@ -237,15 +256,19 @@ export default function Capture({ setScreen }) {
               <span className="text-[10px] uppercase tracking-wider text-amber-400 font-semibold">Editing #{focusedIdx + 1}</span>
               <span className="font-mono text-sm text-neutral-200 truncate">{focused.code} · Z{focused.zone}</span>
             </div>
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 flex-wrap justify-end">
               <QualityToggle value={focusedQuality} onChange={handleQualityChange} label="" />
+              <DeceptionToggle value={focusedDeception} onChange={handleDeceptionChange} label="" />
               <button onClick={handleDeleteFocused} className="px-2 py-1.5 rounded-md bg-red-900/50 border border-red-700/60 text-red-200 text-xs font-semibold hover:bg-red-900 active:scale-95">Delete</button>
               <button onClick={() => setFocusedIdx(null)} className="px-2 py-1.5 rounded-md bg-neutral-800 border border-neutral-700 text-neutral-200 text-xs font-semibold hover:bg-neutral-700 active:scale-95">Done</button>
             </div>
           </>
         ) : (
           <>
-            <QualityToggle value={quality} onChange={handleQualityChange} />
+            <div className="flex items-center gap-3 flex-wrap">
+              <QualityToggle value={quality} onChange={handleQualityChange} />
+              <DeceptionToggle value={deception} onChange={handleDeceptionChange} />
+            </div>
             <div className="flex items-center gap-2">
               <button
                 onClick={() => setShowLog(true)}

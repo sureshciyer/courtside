@@ -11,6 +11,16 @@ const QUALITY_DOT = {
   Ineffective: "bg-red-400",
 };
 
+// Compact one-letter glyph shown on the timeline card when a shot has been
+// tagged with a deception type other than "none".
+const DECEPTION_GLYPH = {
+  hold:      { ch: "H", cls: "bg-violet-500 text-white" },
+  disguised: { ch: "D", cls: "bg-fuchsia-500 text-white" },
+  // Legacy values from earlier captures — render the closest single-letter form.
+  delay:         { ch: "H", cls: "bg-violet-500 text-white" },
+  double_motion: { ch: "D", cls: "bg-fuchsia-500 text-white" },
+};
+
 const SERVE_CODES = new Set(SHOT_CODES.serve.map((s) => s.code));
 
 export default function Timeline({ shots, focusedIdx, onFocus, onUndo, onCycleGrip, onCycleDir }) {
@@ -90,6 +100,14 @@ function ShotCard({ idx, shot, focused, onFocus, onCycleGrip, onCycleDir }) {
           <span className="text-[10px] text-neutral-400">Z{shot.zone}</span>
         )}
         <span className={`w-1.5 h-1.5 rounded-full ${QUALITY_DOT[quality]}`} title={quality} />
+        {DECEPTION_GLYPH[shot.deceptionType] && (
+          <span
+            className={`text-[8px] font-bold leading-none px-1 py-0.5 rounded ${DECEPTION_GLYPH[shot.deceptionType].cls}`}
+            title={`Deception: ${shot.deceptionType}`}
+          >
+            {DECEPTION_GLYPH[shot.deceptionType].ch}
+          </span>
+        )}
         <span className="text-[9px] uppercase tracking-wider text-neutral-500">#{idx + 1}</span>
       </div>
     </div>
