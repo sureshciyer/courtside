@@ -816,6 +816,7 @@ export const reportBundle = (matches) => {
   const agg = setAggregate(rallies); // reuse — the numbers roll up cleanly
   const style = classifyStyle(agg.shots);
   const predictability = analyzeResponsePredictability(matches);
+  const unforcedErrors = analyzeUnforcedErrors(matches);
   return {
     matches,
     rallies,
@@ -840,6 +841,7 @@ export const reportBundle = (matches) => {
     serveThirdShot: serveThirdShotTable(rallies),
     zoneWeakness: analyzeZoneWeakness(rallies),
     trainingPlan: generateTrainingPlan(matches),
+    unforcedErrors,
     predictability,
     pressurePredictability: analyzePressurePredictability(matches, { allPatterns: predictability }),
   };
@@ -984,6 +986,353 @@ export const analyzeZoneWeakness = (rallies) => {
     originSourceMix,
     finding,
   };
+};
+
+// ===================================================================
+//  UNFORCED ERROR BREAKDOWN
+//
+//  Coach-facing UE analysis. Count answers "where do errors happen most?"
+//  while UE rate answers "how often does this zone/pattern become an error
+//  when it occurs?" Denominators are opportunity counts from Son shots.
+// ===================================================================
+
+const UE_SAMPLE_MAIN_MIN = 5;
+const UE_SAMPLE_DIRECTIONAL_MIN = 3;
+const UE_MAX_EVIDENCE = 5;
+
+const parsePreRallyScore = (score) => {
+  const [sonRaw, oppRaw] = (score || "0-0").split("-");
+  const son = Number(sonRaw) || 0;
+  const opp = Number(oppRaw) || 0;
+  return { son, opp, max: Math.max(son, opp) };
+};
+
+const ueSampleLevel = (opportunities) => {
+  if (opportunities >= UE_SAMPLE_MAIN_MIN) return "main";
+  if (opportunities >= UE_SAMPLE_DIRECTIONAL_MIN) return "directional_only";
+  return "below_threshold";
+};
+
+const compactResponseLabel = ({ grip, shotType, direction, targetZone }) =>
+  `${grip || "?"}-${shotType || "?"}-${direction || "?"} to Z${targetZone ?? "?"}`;
+
+const addMapCount = (map, key, by = 1) => {
+  if (key == null) return;
+  map.set(key, (map.get(key) || 0) + by);
+};
+
+const evidenceKey = (event) =>
+  `${event.matchId}|${event.set}|${event.rallyIndex}|${event.score || ""}`;
+
+const dedupeEvidence = (events, maxEvidence = UE_MAX_EVIDENCE) => {
+  const seen = new Set();
+  const evidence = [];
+  for (const event of events) {
+    const key = evidenceKey(event);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    evidence.push({
+      matchId: event.matchId,
+      set: event.set,
+      rallyIndex: event.rallyIndex,
+      score: event.score,
+      label: event.evidenceLabel,
+    });
+    if (evidence.length >= maxEvidence) break;
+  }
+  return evidence;
+};
+
+const topErrorResponse = (events) => {
+  const counts = new Map();
+  for (const event of events) {
+    if (!event.errorResponseLabel) continue;
+    if (!counts.has(event.errorResponseLabel)) {
+      counts.set(event.errorResponseLabel, {
+        label: event.errorResponseLabel,
+        key: event.errorResponseKey,
+        count: 0,
+      });
+    }
+    counts.get(event.errorResponseLabel).count++;
+  }
+  return [...counts.values()]
+    .sort((a, b) => b.count - a.count || a.label.localeCompare(b.label))[0] || null;
+};
+
+const buildUERows = ({ events, totalUEs, keyFor, labelFor, opportunitiesFor, decorate }) => {
+  const groups = new Map();
+  for (const event of events) {
+    const key = keyFor(event);
+    if (key == null) continue;
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(event);
+  }
+
+  return [...groups.entries()]
+    .map(([key, groupEvents]) => {
+      const opportunities = opportunitiesFor(key, groupEvents);
+      const row = {
+        key,
+        label: labelFor(key, groupEvents),
+        count: groupEvents.length,
+        pctOfTotalUEs: pct(groupEvents.length, totalUEs),
+        opportunities,
+        ueRate: opportunities > 0 ? pct(groupEvents.length, opportunities) : null,
+        sampleLevel: ueSampleLevel(opportunities),
+        lowSample: opportunities < UE_SAMPLE_MAIN_MIN,
+        evidence: dedupeEvidence(groupEvents),
+        topErrorResponse: topErrorResponse(groupEvents),
+      };
+      return decorate ? { ...row, ...decorate(key, groupEvents, row) } : row;
+    })
+    .sort(
+      (a, b) =>
+        b.count - a.count ||
+        (b.ueRate ?? -1) - (a.ueRate ?? -1) ||
+        b.opportunities - a.opportunities ||
+        String(a.label).localeCompare(String(b.label)),
+    );
+};
+
+const pressurePhaseLabels = {
+  all_points: "All points",
+  clutch: "Clutch",
+  late_phase_12_plus: "Late phase, 12+",
+  after_lost_point: "After lost point",
+};
+
+const eventPressurePhases = (event) => [
+  "all_points",
+  event.clutch ? "clutch" : null,
+  event.lateSet ? "late_phase_12_plus" : null,
+  event.afterLostPoint ? "after_lost_point" : null,
+].filter(Boolean);
+
+const groupPhaseLabel = (events) => {
+  const phases = new Set();
+  for (const event of events) {
+    for (const phase of eventPressurePhases(event)) {
+      if (phase !== "all_points") phases.add(phase);
+    }
+  }
+  return [...phases].map((phase) => pressurePhaseLabels[phase]).join(", ") || pressurePhaseLabels.all_points;
+};
+
+const buildUEInsight = (breakdown) => {
+  const origin = breakdown.ueByInferredOriginZone
+    .filter((row) => row.sampleLevel !== "below_threshold")[0];
+  const pattern = breakdown.topUEPatterns[0];
+
+  if (!breakdown.totalUEs) {
+    return "No Son unforced errors captured yet.";
+  }
+  if (origin && pattern) {
+    return (
+      `${origin.label} is the clearest current error source. Many UEs occur when Son receives ` +
+      `to ${origin.label} and attempts ${pattern.errorResponse}. Train this as a decision-tree ` +
+      `situation, not just a technical stroke issue.`
+    );
+  }
+  if (origin) {
+    return (
+      `${origin.label} is the clearest current error source. Use the evidence rows to train the ` +
+      `incoming-shot decision before treating it as only a stroke issue.`
+    );
+  }
+  return "UE samples exist, but current denominators are still too small for a stable source pattern.";
+};
+
+export const analyzeUnforcedErrors = (matches) => {
+  const events = [];
+  const targetOpportunities = new Map();
+  const originOpportunities = new Map();
+  const shotTypeOpportunities = new Map();
+  const incomingPatternOpportunities = new Map();
+  const pressureOpportunities = new Map();
+
+  for (const m of matches || []) {
+    let prevRally = null;
+    let prevSet = null;
+    const rallies = m.rallies || [];
+
+    for (let rIdx = 0; rIdx < rallies.length; rIdx++) {
+      const r = rallies[rIdx];
+      if (prevSet !== null && prevSet !== r.set) prevRally = null;
+
+      const score = parsePreRallyScore(r.score);
+      const afterLostPoint = prevRally?.pointWonBy === "O";
+      const rallyFlags = {
+        clutch: score.max >= 16,
+        lateSet: score.max >= 12,
+        afterLostPoint,
+      };
+
+      addMapCount(pressureOpportunities, "all_points");
+      if (rallyFlags.clutch) addMapCount(pressureOpportunities, "clutch");
+      if (rallyFlags.lateSet) addMapCount(pressureOpportunities, "late_phase_12_plus");
+      if (rallyFlags.afterLostPoint) addMapCount(pressureOpportunities, "after_lost_point");
+
+      const shots = r.shots || [];
+      for (let i = 0; i < shots.length; i++) {
+        if (shotHitter(r, i) !== "S") continue;
+        const sonShot = shots[i];
+        const ctx = deriveShotContext(r, i);
+        const targetZone = ctx?.targetZone ?? sonShot.zone;
+        const originZone = ctx?.inferredOriginZone;
+        const incomingType = ctx?.previousOpponentShotType;
+        const incomingZone = ctx?.previousOpponentShotZone;
+
+        addMapCount(targetOpportunities, targetZone);
+        addMapCount(originOpportunities, originZone);
+        addMapCount(shotTypeOpportunities, sonShot.shotType);
+        if (incomingType && incomingZone != null) {
+          addMapCount(incomingPatternOpportunities, `${incomingType}-Z${incomingZone}`);
+        }
+      }
+
+      if (r.result === "UE" && r.pointWonBy === "O" && shots.length > 0) {
+        const finalIndex = shots.length - 1;
+        const finalHitBy = shotHitter(r, finalIndex);
+        const finalShot = shots[finalIndex];
+
+        if (finalHitBy !== "O") {
+          const ctx = deriveShotContext(r, finalIndex);
+          const matchId = r.matchId || m.id;
+          const targetZone = ctx?.targetZone ?? finalShot.zone;
+          const originZone = ctx?.inferredOriginZone;
+          const previousOpponentShotType = ctx?.previousOpponentShotType ?? null;
+          const previousOpponentShotZone = ctx?.previousOpponentShotZone ?? null;
+          const errorResponseLabel = compactResponseLabel({
+            grip: ctx?.grip ?? finalShot.grip,
+            shotType: ctx?.shotType ?? finalShot.shotType,
+            direction: ctx?.dir ?? finalShot.dir,
+            targetZone,
+          });
+          const incomingPatternKey =
+            previousOpponentShotType && previousOpponentShotZone != null
+              ? `${previousOpponentShotType}-Z${previousOpponentShotZone}`
+              : null;
+          const incomingPatternLabel = incomingPatternKey
+            ? `Opp ${previousOpponentShotType} to Z${previousOpponentShotZone}`
+            : "Unknown incoming";
+          const errorResponseKey = `${ctx?.grip ?? finalShot.grip ?? "?"}-${ctx?.shotType ?? finalShot.shotType ?? "?"}-${ctx?.dir ?? finalShot.dir ?? "?"}-Z${targetZone ?? "?"}`;
+          const event = {
+            matchId,
+            set: r.set,
+            rallyIndex: rIdx + 1,
+            score: r.score,
+            finalShotType: ctx?.shotType ?? finalShot.shotType ?? null,
+            finalShotGrip: ctx?.grip ?? finalShot.grip ?? null,
+            finalShotDirection: ctx?.dir ?? finalShot.dir ?? null,
+            finalShotTargetZone: targetZone ?? null,
+            targetZone: targetZone ?? null,
+            inferredOriginZone: originZone ?? null,
+            previousOpponentShotType,
+            previousOpponentShotZone,
+            clutch: rallyFlags.clutch,
+            lateSet: rallyFlags.lateSet,
+            afterLostPoint: rallyFlags.afterLostPoint,
+            rallyLength: shots.length,
+            evidenceLabel: `${matchId} S${r.set ?? "?"} R${rIdx + 1}${r.score ? ` @ ${r.score}` : ""}`,
+            incomingPatternKey,
+            incomingPatternLabel,
+            errorResponseKey,
+            errorResponseLabel,
+          };
+          events.push(event);
+
+          // Legacy fallback: if hitter cannot be derived, the UE outcome
+          // still proves this final shot was Son's error shot. Count it as
+          // one known opportunity for its own denominators.
+          if (finalHitBy == null) {
+            addMapCount(targetOpportunities, event.targetZone);
+            addMapCount(originOpportunities, event.inferredOriginZone);
+            addMapCount(shotTypeOpportunities, event.finalShotType);
+            if (event.incomingPatternKey) {
+              addMapCount(incomingPatternOpportunities, event.incomingPatternKey);
+            }
+          }
+        }
+      }
+
+      prevRally = r;
+      prevSet = r.set;
+    }
+  }
+
+  const totalUEs = events.length;
+  const ueByTargetZone = buildUERows({
+    events,
+    totalUEs,
+    keyFor: (event) => event.targetZone,
+    labelFor: (key) => `Z${key}`,
+    opportunitiesFor: (key) => targetOpportunities.get(key) || 0,
+  });
+  const ueByInferredOriginZone = buildUERows({
+    events,
+    totalUEs,
+    keyFor: (event) => event.inferredOriginZone,
+    labelFor: (key) => `Z${key}`,
+    opportunitiesFor: (key) => originOpportunities.get(key) || 0,
+  });
+  const ueByShotType = buildUERows({
+    events,
+    totalUEs,
+    keyFor: (event) => event.finalShotType,
+    labelFor: (key) => SHOT_NAMES[key] || key,
+    opportunitiesFor: (key) => shotTypeOpportunities.get(key) || 0,
+  });
+  const ueByResponsePattern = buildUERows({
+    events,
+    totalUEs,
+    keyFor: (event) =>
+      event.incomingPatternKey ? `${event.incomingPatternKey}|${event.errorResponseKey}` : null,
+    labelFor: (key, groupEvents) =>
+      `${groupEvents[0].incomingPatternLabel} -> ${groupEvents[0].errorResponseLabel}`,
+    opportunitiesFor: (_key, groupEvents) =>
+      incomingPatternOpportunities.get(groupEvents[0].incomingPatternKey) || 0,
+    decorate: (_key, groupEvents) => ({
+      incomingPattern: groupEvents[0].incomingPatternLabel,
+      incomingPatternKey: groupEvents[0].incomingPatternKey,
+      errorResponse: groupEvents[0].errorResponseLabel,
+      errorResponseKey: groupEvents[0].errorResponseKey,
+      phase: [...new Set(groupEvents.flatMap((event) => eventPressurePhases(event).filter((p) => p !== "all_points")))].join(", ") || "all_points",
+      phaseLabel: groupPhaseLabel(groupEvents),
+    }),
+  });
+
+  const pressureEvents = [];
+  for (const event of events) {
+    for (const phase of eventPressurePhases(event)) {
+      pressureEvents.push({ ...event, pressurePhase: phase });
+    }
+  }
+  const ueByPressurePhase = buildUERows({
+    events: pressureEvents,
+    totalUEs,
+    keyFor: (event) => event.pressurePhase,
+    labelFor: (key) => pressurePhaseLabels[key] || key,
+    opportunitiesFor: (key) => pressureOpportunities.get(key) || 0,
+  });
+
+  const topUEPatterns = ueByResponsePattern
+    .filter((row) => row.sampleLevel !== "below_threshold")
+    .slice(0, 10);
+
+  const breakdown = {
+    totalUEs,
+    events,
+    ueByTargetZone,
+    ueByInferredOriginZone,
+    ueByShotType,
+    ueByResponsePattern,
+    ueByPressurePhase,
+    topUEPatterns,
+    insight: "",
+  };
+  breakdown.insight = buildUEInsight(breakdown);
+  return breakdown;
 };
 
 // ===================================================================

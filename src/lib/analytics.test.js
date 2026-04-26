@@ -36,6 +36,7 @@ import {
   killChainSetups,
   analyzeKillChains,
   generateTrainingPlan,
+  analyzeUnforcedErrors,
   analyzeResponsePredictability,
   analyzePressurePredictability,
 } from "./analytics.js";
@@ -1005,6 +1006,195 @@ describe("analyzeZoneWeakness", () => {
     // Origin Z7 + bodySide backhand both fire; claim should be supported.
     expect(out.supportedBackhandClaim).toBe(true);
     expect(out.finding).toMatch(/inferred from previous opponent shot/i);
+  });
+});
+
+describe("analyzeUnforcedErrors", () => {
+  const matchOf = (rallies, overrides = {}) =>
+    match({ id: "M001", tournament: "Tour A", opponent: "Opp X", rallies, ...overrides });
+
+  const responseRally = (overrides = {}) => {
+    const {
+      incoming = { shotType: "CL", zone: 7 },
+      response = { shotType: "DR", grip: "F", dir: "CR", zone: 3 },
+      result = "W",
+      pointWonBy = "S",
+      score = "5-5",
+      set = 1,
+      server = "O",
+      matchId = "M001",
+    } = overrides;
+    return rally({
+      matchId,
+      set,
+      server,
+      score,
+      pointWonBy,
+      result,
+      shots: [
+        shot({ shotType: incoming.shotType, zone: incoming.zone }),
+        shot({
+          shotType: response.shotType,
+          grip: response.grip,
+          dir: response.dir,
+          zone: response.zone,
+        }),
+      ],
+    });
+  };
+
+  const ueResponse = (overrides = {}) =>
+    responseRally({ ...overrides, result: "UE", pointWonBy: "O" });
+
+  it("extracts Son UE final-shot context and skips definitive opponent final shots", () => {
+    const sonUE = ueResponse({ score: "16-15" });
+    const impossibleOppFinal = rally({
+      matchId: "M001",
+      server: "S",
+      result: "UE",
+      pointWonBy: "O",
+      shots: [
+        shot({ shotType: "LS", zone: 2 }),
+        shot({ shotType: "DR", grip: "F", dir: "CR", zone: 5 }),
+      ],
+    });
+
+    const out = analyzeUnforcedErrors([matchOf([sonUE, impossibleOppFinal])]);
+    expect(out.totalUEs).toBe(1);
+    expect(out.events[0]).toMatchObject({
+      matchId: "M001",
+      rallyIndex: 1,
+      score: "16-15",
+      finalShotType: "DR",
+      finalShotGrip: "F",
+      finalShotDirection: "CR",
+      finalShotTargetZone: 3,
+      inferredOriginZone: 7,
+      previousOpponentShotType: "CL",
+      previousOpponentShotZone: 7,
+      clutch: true,
+      lateSet: true,
+      afterLostPoint: false,
+      rallyLength: 2,
+      errorResponseLabel: "F-DR-CR to Z3",
+    });
+    expect(out.events[0].evidenceLabel).toBe("M001 S1 R1 @ 16-15");
+  });
+
+  it("uses final-shot fallback for legacy UE data when hitter is not derivable", () => {
+    const legacyUE = rally({
+      matchId: "M001",
+      server: null,
+      result: "UE",
+      pointWonBy: "O",
+      shots: [shot({ shotType: "LF", grip: "B", dir: "ST", zone: 7 })],
+    });
+
+    const out = analyzeUnforcedErrors([matchOf([legacyUE])]);
+    expect(out.totalUEs).toBe(1);
+    expect(out.events[0].finalShotType).toBe("LF");
+    expect(out.events[0].errorResponseLabel).toBe("B-LF-ST to Z7");
+    expect(out.ueByTargetZone[0]).toMatchObject({
+      label: "Z7",
+      count: 1,
+      opportunities: 1,
+      sampleLevel: "below_threshold",
+    });
+  });
+
+  it("computes denominator-based UE rates for zones, shot types, and response patterns", () => {
+    const rallies = [
+      ueResponse(),
+      ueResponse(),
+      responseRally(),
+      responseRally(),
+      responseRally(),
+    ];
+
+    const out = analyzeUnforcedErrors([matchOf(rallies)]);
+    expect(out.ueByInferredOriginZone[0]).toMatchObject({
+      label: "Z7",
+      count: 2,
+      opportunities: 5,
+      ueRate: 40,
+      sampleLevel: "main",
+    });
+    expect(out.ueByShotType[0]).toMatchObject({
+      label: "Drop",
+      count: 2,
+      opportunities: 5,
+      ueRate: 40,
+    });
+    expect(out.topUEPatterns[0]).toMatchObject({
+      incomingPattern: "Opp CL to Z7",
+      errorResponse: "F-DR-CR to Z3",
+      count: 2,
+      opportunities: 5,
+      ueRate: 40,
+      sampleLevel: "main",
+    });
+  });
+
+  it("marks denominator 3-4 as directional only and denominator <=2 below threshold", () => {
+    const directional = [
+      ueResponse({ incoming: { shotType: "NT", zone: 8 } }),
+      responseRally({ incoming: { shotType: "NT", zone: 8 } }),
+      responseRally({ incoming: { shotType: "NT", zone: 8 } }),
+    ];
+    const below = [
+      ueResponse({ incoming: { shotType: "LF", zone: 6 }, response: { shotType: "CL", grip: "F", dir: "ST", zone: 9 } }),
+      responseRally({ incoming: { shotType: "LF", zone: 6 }, response: { shotType: "CL", grip: "F", dir: "ST", zone: 9 } }),
+    ];
+
+    const out = analyzeUnforcedErrors([matchOf([...directional, ...below])]);
+    expect(out.ueByInferredOriginZone.find((row) => row.label === "Z8").sampleLevel).toBe("directional_only");
+    expect(out.ueByInferredOriginZone.find((row) => row.label === "Z6").sampleLevel).toBe("below_threshold");
+    expect(out.topUEPatterns.some((row) => row.incomingPattern === "Opp LF to Z6")).toBe(false);
+  });
+
+  it("deduplicates evidence by matchId, set, rallyIndex, and score", () => {
+    const m1 = matchOf([ueResponse({ score: "8-8" })]);
+    const m2 = matchOf([ueResponse({ score: "8-8" })], { id: "M001" });
+
+    const out = analyzeUnforcedErrors([m1, m2]);
+    const row = out.ueByInferredOriginZone[0];
+    expect(row.count).toBe(2);
+    expect(row.evidence).toHaveLength(1);
+    expect(row.evidence[0].label).toBe("M001 S1 R1 @ 8-8");
+  });
+
+  it("does not carry afterLostPoint across set or match boundaries", () => {
+    const lostSet1 = rally({
+      matchId: "M001",
+      set: 1,
+      server: "O",
+      result: "UE",
+      pointWonBy: "O",
+      shots: [shot({ shotType: "CL", zone: 7 }), shot({ shotType: "DR", zone: 3 })],
+    });
+    const ueSet2 = ueResponse({ set: 2, score: "1-0" });
+    const m1 = matchOf([lostSet1, ueSet2]);
+    const m2 = match({
+      id: "M002",
+      rallies: [ueResponse({ matchId: "M002", score: "1-1" })],
+    });
+
+    const out = analyzeUnforcedErrors([m1, m2]);
+    expect(out.events.find((event) => event.matchId === "M001" && event.set === 2).afterLostPoint).toBe(false);
+    expect(out.events.find((event) => event.matchId === "M002").afterLostPoint).toBe(false);
+  });
+
+  it("sets clutch and lateSet from pre-rally score", () => {
+    const out = analyzeUnforcedErrors([matchOf([
+      ueResponse({ score: "12-11" }),
+      ueResponse({ score: "16-15" }),
+    ])]);
+
+    expect(out.events[0].lateSet).toBe(true);
+    expect(out.events[0].clutch).toBe(false);
+    expect(out.events[1].lateSet).toBe(true);
+    expect(out.events[1].clutch).toBe(true);
+    expect(out.ueByPressurePhase.find((row) => row.key === "late_phase_12_plus").label).toBe("Late phase, 12+");
   });
 });
 

@@ -190,6 +190,9 @@ export const matchAnalysisMarkdown = (match, { playerName = "Player" } = {}) => 
   );
   md += P(`**Fatigue ratio:** ${fatigue.ratio}× _(≥ 2.0 flags a concern)_`);
 
+  // Unforced error breakdown
+  md += unforcedErrorsMarkdown(bundle.unforcedErrors);
+
   // Effectiveness
   md += H2("Effectiveness index");
   md += P(
@@ -364,6 +367,69 @@ const rallyLengthInsightMarkdown = (best) => {
     `**${tone}:** Best win rate is in the **${best.bucket}-shot** bucket ` +
     `(${best.winPct}% — ${best.won}W/${best.lost}L from ${best.total} rallies).${caveat}`
   );
+};
+
+const evidenceText = (evidence) =>
+  evidence?.length ? evidence.map((e) => e.label).join(", ") : "—";
+
+const sampleNote = (row) =>
+  row.sampleLevel === "directional_only" ? " directional only" : "";
+
+const unforcedErrorsMarkdown = (data) => {
+  let md = H2("Unforced Error Breakdown");
+  if (!data || data.totalUEs === 0) {
+    md += P("_No Son unforced errors captured in this scope._");
+    return md;
+  }
+
+  md += P(data.insight);
+  md += P("Count shows where errors occurred most often. UE rate adjusts for how often that zone/pattern occurred.");
+
+  const originRows = data.ueByInferredOriginZone.filter((row) => row.sampleLevel !== "below_threshold");
+  const originBelow = data.ueByInferredOriginZone.filter((row) => row.sampleLevel === "below_threshold");
+  md += H3("UE by inferred origin zone");
+  if (originRows.length) {
+    md += table(
+      ["Zone", "UE count", "Opportunities", "UE rate", "Top error response", "Evidence"],
+      originRows.map((row) => [
+        row.label,
+        `${row.count} (${row.pctOfTotalUEs}%)${sampleNote(row)}`,
+        row.opportunities,
+        row.ueRate == null ? "—" : `${row.ueRate}%`,
+        row.topErrorResponse?.label || "—",
+        evidenceText(row.evidence),
+      ]),
+    );
+  } else {
+    md += P("_No origin-zone denominator reaches the 3-opportunity directional threshold yet._");
+  }
+  if (originBelow.length) {
+    md += P(`_${originBelow.length} origin-zone row${originBelow.length !== 1 ? "s" : ""} hidden below threshold (2 or fewer opportunities)._`);
+  }
+
+  const patternRows = data.topUEPatterns;
+  const patternBelow = data.ueByResponsePattern.filter((row) => row.sampleLevel === "below_threshold");
+  md += H3("Top UE patterns");
+  if (patternRows.length) {
+    md += table(
+      ["Incoming pattern", "Error response", "Count", "UE rate", "Phase", "Evidence"],
+      patternRows.map((row) => [
+        row.incomingPattern,
+        `${row.errorResponse}${sampleNote(row)}`,
+        `${row.count} (${row.pctOfTotalUEs}%)`,
+        row.ueRate == null ? "—" : `${row.ueRate}%`,
+        row.phaseLabel,
+        evidenceText(row.evidence),
+      ]),
+    );
+  } else {
+    md += P("_No response-pattern denominator reaches the 3-opportunity directional threshold yet._");
+  }
+  if (patternBelow.length) {
+    md += P(`_${patternBelow.length} response-pattern row${patternBelow.length !== 1 ? "s" : ""} hidden below threshold (2 or fewer opportunities)._`);
+  }
+
+  return md;
 };
 
 // ===================================================================
@@ -790,6 +856,9 @@ export const performanceReportMarkdown = (matches, { playerName = "Player", scop
     ]
   );
   md += P(`**Fatigue ratio:** ${fatigue.ratio}× _(≥ 2.0 flags a concern)_`);
+
+  // Unforced error breakdown
+  md += unforcedErrorsMarkdown(bundle.unforcedErrors);
 
   // Effectiveness
   md += H2("Effectiveness index");

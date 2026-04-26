@@ -88,6 +88,27 @@ describe("performanceReportMarkdown", () => {
     expect(md).toMatch(/Clutch \+30pp/);
     expect(md).toMatch(/In clutch points, Son becomes more predictable from Z7/);
   });
+
+  it("exports the Unforced Error Breakdown with count/rate note and compact notation", () => {
+    const ueRally = (incoming, response, outcome = {}) =>
+      stimulusRally(incoming, response, { ...outcome, pointWonBy: "O", result: "UE" });
+    const rallies = [
+      ueRally({ shotType: "CL", zone: 7 }, { shotType: "DR", grip: "F", dir: "CR", zone: 3 }),
+      ueRally({ shotType: "CL", zone: 7 }, { shotType: "DR", grip: "F", dir: "CR", zone: 3 }),
+      stimulusRally({ shotType: "CL", zone: 7 }, { shotType: "DR", grip: "F", dir: "CR", zone: 3 }),
+      stimulusRally({ shotType: "CL", zone: 7 }, { shotType: "DR", grip: "F", dir: "CR", zone: 3 }),
+      stimulusRally({ shotType: "CL", zone: 7 }, { shotType: "DR", grip: "F", dir: "CR", zone: 3 }),
+      ueRally({ shotType: "NT", zone: 8 }, { shotType: "LF", grip: "B", dir: "ST", zone: 7 }),
+      stimulusRally({ shotType: "NT", zone: 8 }, { shotType: "LF", grip: "B", dir: "ST", zone: 7 }),
+      stimulusRally({ shotType: "NT", zone: 8 }, { shotType: "LF", grip: "B", dir: "ST", zone: 7 }),
+    ];
+
+    const md = performanceReportMarkdown([match({ rallies })]);
+    expect(md).toMatch(/Unforced Error Breakdown/);
+    expect(md).toMatch(/Count shows where errors occurred most often/);
+    expect(md).toMatch(/F-DR-CR to Z3/);
+    expect(md).toMatch(/directional only/);
+  });
 });
 
 describe("matchAnalysisMarkdown", () => {
@@ -103,5 +124,23 @@ describe("matchAnalysisMarkdown", () => {
     const m = match({ rallies: [] });
     const md = matchAnalysisMarkdown(m);
     expect(md).toMatch(/No rally data captured/);
+  });
+
+  it("includes the Unforced Error Breakdown for a single match export", () => {
+    const m = match({
+      rallies: [
+        rally({
+          server: "O",
+          pointWonBy: "O",
+          result: "UE",
+          shots: [
+            shot({ shotType: "CL", zone: 7 }),
+            shot({ shotType: "DR", grip: "F", dir: "CR", zone: 3 }),
+          ],
+        }),
+      ],
+    });
+    const md = matchAnalysisMarkdown(m);
+    expect(md).toMatch(/Unforced Error Breakdown/);
   });
 });

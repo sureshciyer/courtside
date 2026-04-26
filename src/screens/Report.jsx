@@ -95,7 +95,7 @@ export default function Report({ setScreen }) {
           clutch, fatigue, deception, effectiveness,
           winnerZones, errorZonesAll, allZones, recs, advanced, confidence,
           leaks, serveThirdShot, zoneWeakness, trainingPlan,
-          predictability, pressurePredictability } = bundle;
+          unforcedErrors, predictability, pressurePredictability } = bundle;
   const wonMatches = matches.filter((m) => {
     const setsWon = m.sets.filter((s) => s.sonScore > s.oppScore).length;
     return setsWon > m.sets.length / 2;
@@ -211,6 +211,7 @@ export default function Report({ setScreen }) {
             ["a5", "5. Serve & return game"],
             ["a6", "6. Clutch performance"],
             ["a7", "7. Fatigue & endurance"],
+            ["a7-ue", "Unforced Error Breakdown"],
             ["a8", "8. Effectiveness index"],
             ["a9", "9. Predictability & deception"],
             ["a10", "10. Tactical cleverness"],
@@ -412,6 +413,10 @@ export default function Report({ setScreen }) {
           Prioritize endurance conditioning.
         </Flag>
       )}
+
+      {/* Unforced Error Breakdown */}
+      <SH id="a7-ue" t="Unforced Error Breakdown" />
+      <UnforcedErrorBreakdown data={unforcedErrors} />
 
       {/* 8. Effectiveness index */}
       <SH id="a8" n="8" t="Effectiveness index" />
@@ -903,6 +908,174 @@ function ProLevelFindings({
       </span>
     );
   }
+}
+
+// ===================================================================
+//                    UNFORCED ERROR BREAKDOWN
+//  Coach-facing UE split. Count = where mistakes happened most; rate =
+//  mistakes divided by opportunities for that zone/pattern.
+// ===================================================================
+function UnforcedErrorBreakdown({ data }) {
+  if (!data || data.totalUEs === 0) {
+    return <Empty>No Son unforced errors captured in this scope.</Empty>;
+  }
+
+  const originMain = data.ueByInferredOriginZone.filter((row) => row.sampleLevel === "main");
+  const originDirectional = data.ueByInferredOriginZone.filter((row) => row.sampleLevel === "directional_only");
+  const originBelow = data.ueByInferredOriginZone.filter((row) => row.sampleLevel === "below_threshold");
+  const patternMain = data.topUEPatterns.filter((row) => row.sampleLevel === "main");
+  const patternDirectional = data.topUEPatterns.filter((row) => row.sampleLevel === "directional_only");
+  const patternBelow = data.ueByResponsePattern.filter((row) => row.sampleLevel === "below_threshold");
+
+  return (
+    <div className="space-y-3">
+      <div className="bg-neutral-900 border border-neutral-800 rounded-lg p-3 print:bg-white print:border-neutral-400">
+        <div className="text-xs text-neutral-300 leading-relaxed print:text-black">{data.insight}</div>
+        <div className="text-[11px] text-neutral-500 mt-1 leading-relaxed print:text-black">
+          Count shows where errors occurred most often. UE rate adjusts for how often that zone/pattern occurred.
+        </div>
+      </div>
+
+      <UETableFrame title="UE by inferred origin zone" belowCount={originBelow.length}>
+        {originMain.length === 0 && originDirectional.length === 0 ? (
+          <tbody>
+            <tr>
+              <Td colSpan={6} className="text-neutral-500 print:text-black">
+                No origin-zone denominator reaches the 3-opportunity directional threshold yet.
+              </Td>
+            </tr>
+          </tbody>
+        ) : (
+          <tbody>
+            {originMain.map((row) => <UEOriginRow key={row.key} row={row} />)}
+            {originDirectional.map((row) => <UEOriginRow key={row.key} row={row} directional />)}
+          </tbody>
+        )}
+      </UETableFrame>
+
+      <UETableFrame title="Top UE patterns" belowCount={patternBelow.length} pattern>
+        {patternMain.length === 0 && patternDirectional.length === 0 ? (
+          <tbody>
+            <tr>
+              <Td colSpan={6} className="text-neutral-500 print:text-black">
+                No response-pattern denominator reaches the 3-opportunity directional threshold yet.
+              </Td>
+            </tr>
+          </tbody>
+        ) : (
+          <tbody>
+            {patternMain.map((row) => <UEPatternRow key={row.key} row={row} />)}
+            {patternDirectional.map((row) => <UEPatternRow key={row.key} row={row} directional />)}
+          </tbody>
+        )}
+      </UETableFrame>
+    </div>
+  );
+}
+
+function UETableFrame({ title, children, belowCount, pattern = false }) {
+  return (
+    <div>
+      <div className="text-[11px] uppercase tracking-wider font-semibold text-emerald-400 mb-1.5 print:text-black">
+        {title}
+      </div>
+      <div className="overflow-x-auto bg-neutral-950/70 border border-neutral-800 rounded-md print:bg-white print:border-neutral-400">
+        <table className="w-full text-[11px] border-collapse">
+          <thead>
+            <tr className="bg-neutral-800 text-neutral-300 print:bg-neutral-200 print:text-black">
+              {pattern ? (
+                <>
+                  <Th>Incoming pattern</Th>
+                  <Th>Error response</Th>
+                  <Th>Count</Th>
+                  <Th>UE rate</Th>
+                  <Th>Phase</Th>
+                  <Th>Evidence</Th>
+                </>
+              ) : (
+                <>
+                  <Th>Zone</Th>
+                  <Th>UE count</Th>
+                  <Th>Opportunities</Th>
+                  <Th>UE rate</Th>
+                  <Th>Top error response</Th>
+                  <Th>Evidence</Th>
+                </>
+              )}
+            </tr>
+          </thead>
+          {children}
+        </table>
+      </div>
+      {belowCount > 0 && (
+        <div className="text-[10px] text-neutral-500 mt-1 print:text-black">
+          +{belowCount} below-threshold row{belowCount !== 1 ? "s" : ""} hidden (2 or fewer opportunities).
+        </div>
+      )}
+    </div>
+  );
+}
+
+function UEOriginRow({ row, directional = false }) {
+  return (
+    <tr className={`border-b border-neutral-800 print:border-neutral-300 align-top ${directional ? "bg-amber-950/20 print:bg-amber-50" : "bg-neutral-900 print:bg-white"}`}>
+      <Td className="font-mono text-neutral-200 whitespace-nowrap print:text-black">{row.label}</Td>
+      <Td className="font-mono tabular-nums">
+        {row.count} <span className="text-neutral-500">({row.pctOfTotalUEs}%)</span>
+      </Td>
+      <Td className="font-mono tabular-nums">{row.opportunities}</Td>
+      <Td><UERate row={row} /></Td>
+      <Td className="font-mono text-neutral-300 print:text-black">
+        {row.topErrorResponse?.label || "—"}
+        {directional && <SampleBadge label="directional only" />}
+      </Td>
+      <Td><EvidenceList evidence={row.evidence} /></Td>
+    </tr>
+  );
+}
+
+function UEPatternRow({ row, directional = false }) {
+  return (
+    <tr className={`border-b border-neutral-800 print:border-neutral-300 align-top ${directional ? "bg-amber-950/20 print:bg-amber-50" : "bg-neutral-900 print:bg-white"}`}>
+      <Td className="font-mono text-neutral-200 whitespace-nowrap print:text-black">{row.incomingPattern}</Td>
+      <Td className="font-mono text-neutral-300 whitespace-nowrap print:text-black">
+        {row.errorResponse}
+        {directional && <SampleBadge label="directional only" />}
+      </Td>
+      <Td className="font-mono tabular-nums">
+        {row.count} <span className="text-neutral-500">({row.pctOfTotalUEs}%)</span>
+      </Td>
+      <Td><UERate row={row} /></Td>
+      <Td className="text-[10px] text-neutral-400 print:text-black">{row.phaseLabel}</Td>
+      <Td><EvidenceList evidence={row.evidence} /></Td>
+    </tr>
+  );
+}
+
+function UERate({ row }) {
+  if (row.ueRate == null) return <span className="text-neutral-600 print:text-black">—</span>;
+  return (
+    <span className={`font-mono tabular-nums ${row.ueRate >= 30 ? "text-red-400" : row.ueRate >= 18 ? "text-amber-300" : "text-neutral-300"} print:text-black`}>
+      {row.ueRate}% <span className="text-neutral-500">({row.count}/{row.opportunities})</span>
+    </span>
+  );
+}
+
+function EvidenceList({ evidence }) {
+  if (!evidence?.length) return <span className="text-neutral-600 print:text-black">—</span>;
+  return (
+    <span className="text-[10px] text-neutral-500 max-w-[16rem] block truncate print:max-w-none print:whitespace-normal print:text-black">
+      {evidence.map((e) => e.label).join(", ")}
+    </span>
+  );
+}
+
+function SampleBadge({ label }) {
+  return (
+    <span className="ml-1 px-1 py-0.5 rounded border border-amber-800/70 bg-amber-950/60 text-[8px] uppercase tracking-wider text-amber-300 print:bg-white print:text-black print:border-neutral-400">
+      {label}
+    </span>
+  );
 }
 
 // ===================================================================
@@ -1706,7 +1879,9 @@ function AppTable({ rows }) {
 }
 
 function Th({ children }) { return <th className="px-2 py-1.5 text-left font-semibold border-b border-neutral-700 print:border-neutral-400">{children}</th>; }
-function Td({ children, className = "" }) { return <td className={`px-2 py-1 border-b border-neutral-800 print:border-neutral-300 ${className}`}>{children}</td>; }
+function Td({ children, className = "", ...props }) {
+  return <td {...props} className={`px-2 py-1 border-b border-neutral-800 print:border-neutral-300 ${className}`}>{children}</td>;
+}
 
 function ZoneDiagram({ playerName = "Player" }) {
   return (
