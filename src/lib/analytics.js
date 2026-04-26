@@ -2,6 +2,12 @@
 // No React, no store — everything here consumes the plain `matches` array.
 
 import { DISRUPTION_SHOTS, SHOT_NAMES } from "../constants/badminton.js";
+import {
+  BENCHMARKS,
+  PATTERN_MIN_COUNT,
+  SAMPLE_CONFIDENCE,
+  uePctSeverity,
+} from "./benchmarks.js";
 
 // ---------- tiny math helpers ----------
 export const pct = (n, d) => (d > 0 ? Math.round((n / d) * 100) : 0);
@@ -371,19 +377,75 @@ export const clutchStats = (rallies) => {
   };
 };
 
-// Deception Index: Holds (HS) + Slices (SL) use across captured matches.
+// ---------- Deception (Phase 5) ----------
+// HS is Half-Smash — that's a *power-deception* shot, not a hold.
+// Holds / delays / disguised shots can only be counted if the user has
+// explicitly tagged a shot with `deceptionType`. Anything else is unknown.
+//
+// Shape:
+//   {
+//     halfSmashes,        // HS shotType count
+//     slices,             // SL shotType count
+//     holds,              // shots with deceptionType === "hold"
+//     delays,             // ... === "delay"
+//     doubleMotion,       // ... === "double_motion"
+//     disguised,          // ... === "disguised"
+//     taggedTotal,        // any deceptionType set (incl. "none")
+//     trackedDeception,   // any deceptionType not in {none, unknown}
+//     unknown,            // shots with deceptionType missing or "unknown"
+//     total,              // every shot
+//     perMatch,           // (halfSmashes + slices + trackedDeception) / matches — back-compat shape
+//     indexPct,           // share of total shots that show variation
+//     hasAdvancedTagging, // true only if at least one trackedDeception shot exists
+//   }
+//
+// Back-compat note: the old shape exposed `holds` + `slices` keys. Both
+// remain in the output but `holds` now means "hold-tagged shots" instead
+// of "Half-Smash shots".
+export const TRACKED_DECEPTION_TYPES = new Set([
+  "hold", "delay", "double_motion", "disguised",
+]);
+
+export const normaliseDeceptionType = (t) =>
+  t && typeof t === "string" ? t : "unknown";
+
 export const deceptionStats = (matches) => {
-  let holds = 0, slices = 0, total = 0;
-  for (const m of matches) for (const r of m.rallies) for (const s of r.shots) {
-    if (s.shotType === "HS") holds++;
-    if (s.shotType === "SL") slices++;
-    total++;
+  let halfSmashes = 0, slices = 0;
+  let holds = 0, delays = 0, doubleMotion = 0, disguised = 0;
+  let taggedTotal = 0, trackedDeception = 0, unknown = 0, total = 0;
+
+  for (const m of matches || []) {
+    for (const r of m.rallies || []) {
+      for (const s of r.shots || []) {
+        total++;
+        if (s.shotType === "HS") halfSmashes++;
+        if (s.shotType === "SL") slices++;
+
+        const dt = normaliseDeceptionType(s.deceptionType);
+        if (dt === "unknown") unknown++;
+        else taggedTotal++;
+        switch (dt) {
+          case "hold":          holds++;          trackedDeception++; break;
+          case "delay":         delays++;         trackedDeception++; break;
+          case "double_motion": doubleMotion++;   trackedDeception++; break;
+          case "disguised":     disguised++;      trackedDeception++; break;
+          default: break;
+        }
+      }
+    }
   }
-  const n = matches.length || 1;
+
+  const n = (matches || []).length || 1;
+  // Variation share = HS + SL + any tracked deception. We keep this name
+  // (perMatch / indexPct) for the existing UI cards.
+  const variationCount = halfSmashes + slices + trackedDeception;
   return {
-    holds, slices, total,
-    perMatch: +((holds + slices) / n).toFixed(1),
-    indexPct: pct(holds + slices, total),
+    halfSmashes, slices,
+    holds, delays, doubleMotion, disguised,
+    taggedTotal, trackedDeception, unknown, total,
+    perMatch: +(variationCount / n).toFixed(1),
+    indexPct: pct(variationCount, total),
+    hasAdvancedTagging: trackedDeception > 0,
   };
 };
 
@@ -405,7 +467,9 @@ export const effectivenessBreakdown = (rallies) => {
   };
 };
 
-// Win rate bucketed by rally length.
+// Win rate bucketed by rally length. Buckets are stable order: 1-3, 4-8,
+// 9-15, 16+. Each entry exposes raw won/lost counts; callers compute
+// percentages via pct() so we don't double-truncate.
 export const rallyLengthProfile = (rallies) => {
   const buckets = { "1-3": { w: 0, l: 0 }, "4-8": { w: 0, l: 0 }, "9-15": { w: 0, l: 0 }, "16+": { w: 0, l: 0 } };
   for (const r of rallies) {
@@ -415,6 +479,43 @@ export const rallyLengthProfile = (rallies) => {
     else if (r.pointWonBy === "O") buckets[b].l++;
   }
   return buckets;
+};
+
+// Pick the rally-length bucket with the best win rate. Buckets below
+// `minSample` total points are ignored — a 1/1 bucket should not beat a
+// 13/22 bucket. Ties broken by sample size (more = more trustworthy).
+//
+// Returns: { bucket, winPct, won, lost, total, strong }
+//   strong = true when total >= strongSample (claim is safe)
+//   bucket = null when no bucket has >= minSample
+export const bestRallyLengthBucket = (rallies, { minSample = 5, strongSample = 8 } = {}) => {
+  const profile = rallyLengthProfile(rallies);
+  const candidates = Object.entries(profile)
+    .map(([bucket, { w, l }]) => ({
+      bucket,
+      won: w,
+      lost: l,
+      total: w + l,
+      winPct: w + l > 0 ? (w / (w + l)) * 100 : 0,
+    }))
+    .filter((b) => b.total >= minSample);
+
+  if (candidates.length === 0) {
+    return { bucket: null, winPct: 0, won: 0, lost: 0, total: 0, strong: false };
+  }
+  candidates.sort((a, b) => {
+    if (b.winPct !== a.winPct) return b.winPct - a.winPct;
+    return b.total - a.total;
+  });
+  const top = candidates[0];
+  return {
+    bucket: top.bucket,
+    winPct: Math.round(top.winPct),
+    won: top.won,
+    lost: top.lost,
+    total: top.total,
+    strong: top.total >= strongSample,
+  };
 };
 
 // Shot distribution with human names + percentages, sorted desc.
@@ -452,6 +553,80 @@ export const serveReturnStats = (rallies) => {
   };
 };
 
+// ---------- Serve + third-shot table (Phase 7) ----------
+// Extended view: per (serveType, target) cell, with optional return-quality
+// columns. Uses the Phase-7 *optional* shot fields:
+//   shot[0].serveTarget          ("body" | "T" | "wide" | string zone) — defaults to "unknown"
+//   shot[0].serveHeightQuality   ("good" | "high" | string)
+//   shot[0].serveDepthQuality    ("good" | "short" | string)
+//   shot[1].returnType           ("net" | "lift" | "drive" | string)
+//   shot[1].returnQuality        ("weak" | "neutral" | "pressuring")
+//   shot[1].returnTargetZone     (1-9)
+//
+// All fields are optional. When not set, rows show an "unknown" target
+// and the return-quality columns show "—".
+//
+// Output rows:
+//   [{ serveType, target, count, winPct, weakReturnPct, pressuringReturnPct,
+//      thirdShotWinPct, weakReturns, pressuringReturns, returns }]
+//
+// Confidence is the caller's responsibility (use computeSampleConfidence).
+export const SERVE_TYPES = ["LS", "FS", "DS"];
+
+export const serveThirdShotTable = (rallies) => {
+  // serveType -> target -> aggregator
+  const buckets = new Map();
+  const key = (st, tgt) => `${st}::${tgt || "unknown"}`;
+
+  for (const r of rallies) {
+    if (r.server !== "S" || !r.shots?.length) continue;
+    const serve = r.shots[0];
+    if (!SERVE_TYPES.includes(serve.shotType)) continue;
+    const target = serve.serveTarget || "unknown";
+    const k = key(serve.shotType, target);
+    if (!buckets.has(k)) {
+      buckets.set(k, {
+        serveType: serve.shotType,
+        target,
+        count: 0,
+        won: 0,
+        returns: 0,
+        weakReturns: 0,
+        pressuringReturns: 0,
+        thirdShotPts: 0,
+        thirdShotWon: 0,
+      });
+    }
+    const row = buckets.get(k);
+    row.count++;
+    if (r.pointWonBy === "S") row.won++;
+    if (r.shots.length <= 3) {
+      row.thirdShotPts++;
+      if (r.pointWonBy === "S") row.thirdShotWon++;
+    }
+    const ret = r.shots[1];
+    if (ret) {
+      row.returns++;
+      const q = ret.returnQuality;
+      if (q === "weak") row.weakReturns++;
+      else if (q === "pressuring") row.pressuringReturns++;
+    }
+  }
+
+  return [...buckets.values()]
+    .map((row) => ({
+      ...row,
+      winPct: pct(row.won, row.count),
+      weakReturnPct: pct(row.weakReturns, row.returns),
+      pressuringReturnPct: pct(row.pressuringReturns, row.returns),
+      thirdShotWinPct: pct(row.thirdShotWon, row.thirdShotPts),
+    }))
+    .sort((a, b) => {
+      const t = SERVE_TYPES.indexOf(a.serveType) - SERVE_TYPES.indexOf(b.serveType);
+      return t !== 0 ? t : (a.target || "").localeCompare(b.target || "");
+    });
+};
+
 // Per-match summary used in the drill-down — adds playerStyle + opponent style.
 export const matchSummary = (match) => {
   const agg = setAggregate(match.rallies);
@@ -485,25 +660,51 @@ export const recommendations = (matches) => {
     }
   }
 
+  // Zone weakness — only claim a *backhand* problem when origin/contact
+  // data supports it. Otherwise note the target-zone concentration without
+  // the technical attribution (Phase 8).
   const errZ = zoneTallies(rallies, "error");
   const errTotal = Object.values(errZ).reduce((a, v) => a + v, 0);
   const bhErr = (errZ[7] || 0) + (errZ[4] || 0) + (errZ[1] || 0);
+  const zw = analyzeZoneWeakness(rallies);
   if (errTotal >= 4 && pct(bhErr, errTotal) >= 30) {
-    recs.push({
-      priority: 2,
-      tone: "warn",
-      title: "Priority 2: Backhand rear court",
-      body: `Left-column zones (1/4/7) account for ${pct(bhErr, errTotal)}% of all unforced errors. Drills: backhand clear to Zone 9 cross, round-the-head forehand from the BH corner.`,
-    });
+    if (zw.supportedBackhandClaim) {
+      recs.push({
+        priority: 2,
+        tone: "warn",
+        title: "Priority 2: Backhand rear court",
+        body:
+          `Left-column zones (1/4/7) account for ${pct(bhErr, errTotal)}% of all unforced errors, ` +
+          `with origin/contact evidence supporting the technical cause. ` +
+          `Drills: backhand clear to Zone 9 cross, round-the-head forehand from the BH corner.`,
+      });
+    } else {
+      recs.push({
+        priority: 2,
+        tone: "warn",
+        title: "Priority 2: Validate left-side error pattern",
+        body:
+          `Left-column zones (1/4/7) account for ${pct(bhErr, errTotal)}% of unforced errors, ` +
+          `but origin/contact data is missing — capture originZone, bodySide, and contactQuality ` +
+          `during a session to confirm whether this is a backhand technical issue or a ` +
+          `positional/recovery one.`,
+      });
+    }
   }
 
   const dec = deceptionStats(matches);
   if (matches.length >= 2 && dec.perMatch < 3) {
+    const taggedNote = dec.hasAdvancedTagging
+      ? ` (${dec.halfSmashes} HS, ${dec.slices} SL, ${dec.trackedDeception} tagged hold/delay)`
+      : ` (${dec.halfSmashes} HS, ${dec.slices} SL — tagged hold/delay not captured)`;
     recs.push({
       priority: 3,
       tone: "info",
       title: "Priority 3: Add deception to clears",
-      body: `Only ${dec.perMatch} deception shots per match (${dec.holds} holds, ${dec.slices} slices). Introduce hold-and-vary: pause 0.3s, then alternate clear/drop.`,
+      body:
+        `Only ${dec.perMatch} variation shots per match${taggedNote}. ` +
+        `Introduce hold-and-vary: pause 0.3s, then alternate clear/drop. ` +
+        `Tag shots with deceptionType to track hold/delay separately.`,
     });
   }
 
@@ -606,6 +807,7 @@ export const reportBundle = (matches) => {
     style,
     distribution: shotDistribution(rallies),
     lengthProfile: rallyLengthProfile(rallies),
+    bestLengthBucket: bestRallyLengthBucket(rallies),
     serveReturn: serveReturnStats(rallies),
     clutch: clutchStats(rallies),
     fatigue: fatigueStats(matches),
@@ -616,7 +818,279 @@ export const reportBundle = (matches) => {
     allZones: zoneTallies(rallies, "all"),
     recs: recommendations(matches),
     advanced: advancedInsights(rallies),
+    confidence: computeSampleConfidence(matches),
+    leaks: analyzePerformanceLeaks(matches),
+    serveThirdShot: serveThirdShotTable(rallies),
+    zoneWeakness: analyzeZoneWeakness(rallies),
+    trainingPlan: generateTrainingPlan(matches),
   };
+};
+
+// ===================================================================
+//  ZONE WEAKNESS ANALYSIS (Phase 8)
+//  Don't claim "backhand rear-court weakness" from target zone alone.
+//  Only claim a backhand issue if originZone / bodySide / contactQuality
+//  support it. Otherwise return a neutral, evidence-aware finding.
+// ===================================================================
+
+// Optional shot fields used here:
+//   originZone               (1-9) — where Son was when he hit
+//   targetZone               (1-9) — where the shot landed (alias of `zone`)
+//   contactQuality           "clean" | "late" | "stretched" | "offbalance"
+//   bodySide                 "forehand" | "backhand"
+//   recoveryQuality          "good" | "slow" | "lost"
+//   previousOpponentShotType (string)
+//   previousOpponentShotZone (1-9)
+
+const REAR_TARGET_ZONES = new Set([7, 8, 9]); // back-row landings
+
+// "Backhand rear corner" target zones (left rear for right-handers).
+// We use the layout in src/lib/rally.js — Zone 7 is back-left.
+const BACKHAND_REAR_TARGETS = new Set([7]);
+
+const isPoorContact = (q) => q === "late" || q === "stretched" || q === "offbalance";
+
+// Aggregate Son's *errors* by target zone, then look at how many of those
+// errors carry origin/contact evidence supporting a backhand-rear claim.
+//
+// Output:
+//   {
+//     totalErrors,
+//     rearTargetErrors,         // errors landing in 7/8/9
+//     backhandTargetErrors,     // errors landing in 7
+//     errorsWithOriginData,     // errors that have an originZone
+//     errorsWithContactData,    // errors with a contactQuality tag
+//     supportedBackhandClaim,   // true only if evidence supports the claim
+//     finding:                  // human string, used by report + markdown
+//   }
+export const analyzeZoneWeakness = (rallies) => {
+  const errors = [];
+  for (const r of rallies) {
+    if (r.result !== "UE" || r.pointWonBy !== "O") continue;
+    const last = r.shots[r.shots.length - 1];
+    if (!last) continue;
+    errors.push(last);
+  }
+
+  const totalErrors = errors.length;
+  let rearTargetErrors = 0;
+  let backhandTargetErrors = 0;
+  let bhRearWithOriginEvidence = 0;
+  let bhRearWithContactEvidence = 0;
+  let bhRearWithBodySideEvidence = 0;
+  let errorsWithOriginData = 0;
+  let errorsWithContactData = 0;
+
+  for (const s of errors) {
+    const target = s.targetZone || s.zone;
+    if (REAR_TARGET_ZONES.has(target)) rearTargetErrors++;
+    if (BACKHAND_REAR_TARGETS.has(target)) {
+      backhandTargetErrors++;
+      // Origin signal: shot was hit from the backhand corner of own court (zone 7).
+      if (s.originZone === 7) bhRearWithOriginEvidence++;
+      if (isPoorContact(s.contactQuality)) bhRearWithContactEvidence++;
+      if (s.bodySide === "backhand") bhRearWithBodySideEvidence++;
+    }
+    if (s.originZone) errorsWithOriginData++;
+    if (s.contactQuality) errorsWithContactData++;
+  }
+
+  // Need at least 2 backhand-rear errors AND supporting evidence on a
+  // majority of them before we'll make the technical claim.
+  const supportingEvidenceCount =
+    bhRearWithOriginEvidence + bhRearWithContactEvidence + bhRearWithBodySideEvidence;
+  const supportedBackhandClaim =
+    backhandTargetErrors >= 2 &&
+    supportingEvidenceCount >= Math.ceil(backhandTargetErrors / 2);
+
+  let finding;
+  if (totalErrors === 0) {
+    finding = "No unforced errors captured yet — zone weakness analysis pending.";
+  } else if (backhandTargetErrors === 0) {
+    finding = "Errors are spread across the court; no backhand-rear concentration.";
+  } else if (supportedBackhandClaim) {
+    finding =
+      `Backhand rear court appears genuinely weak — ${backhandTargetErrors} errors at Z7 ` +
+      `with origin/contact evidence on ${supportingEvidenceCount} of them.`;
+  } else {
+    finding =
+      "Target-zone errors suggest a possible weakness, but origin/contact data " +
+      "is needed to confirm the technical cause.";
+  }
+
+  return {
+    totalErrors,
+    rearTargetErrors,
+    backhandTargetErrors,
+    errorsWithOriginData,
+    errorsWithContactData,
+    supportedBackhandClaim,
+    finding,
+  };
+};
+
+// ===================================================================
+//  TRAINING PRESCRIPTION GENERATOR (Phase 10)
+//  Pulls from the leak engine, score-pressure analysis, serve+3rd-shot
+//  table, effectiveness breakdown, and zone weakness to generate up to 5
+//  prescriptions in priority order:
+//    1. Reduce UE
+//    2. Closing-game routine
+//    3. Serve + third shot
+//    4. Neutral-to-pressure conversion
+//    5. Validate zone weakness
+//
+//  Each prescription: { id, priority, title, why, drills: [string],
+//                       severity: "critical"|"high"|"medium"|"low",
+//                       confidence: <level from computeSampleConfidence> }
+// ===================================================================
+export const generateTrainingPlan = (matches) => {
+  const rallies = (matches || []).flatMap((m) => m.rallies || []);
+  const leaks = analyzePerformanceLeaks(matches);
+  const eff = effectivenessBreakdown(rallies);
+  const sp = analyzeScorePressure(rallies);
+  const zw = analyzeZoneWeakness(rallies);
+  const conf = computeSampleConfidence(matches);
+
+  const findLeak = (id) => leaks.find((l) => l.id === id) || { severity: "low", value: 0 };
+
+  const plan = [];
+
+  // 1. Reduce UE — always present; severity from the leak engine.
+  const ueLeak = findLeak("ue_rate");
+  plan.push({
+    id: "reduce_ue",
+    priority: 1,
+    title: "Reduce unforced errors",
+    why:
+      `Unforced-error rate is ${ueLeak.value}% (target ≤ ${BENCHMARKS.UE_TARGET_PCT}%). ` +
+      `UE is the single biggest scoreboard leak.`,
+    drills: [
+      "20-shot consistency rallies — clear/drop only, count UE in real time.",
+      "Cross-court drop ladder: 5 in a row to one zone, then switch.",
+      "Pressure-free serve return to a target funnel — keep the next shot inside the singles tramline.",
+    ],
+    severity: ueLeak.severity,
+    confidence: conf.level,
+  });
+
+  // 2. Closing-game routine
+  const clutchLeak = findLeak("clutch_ue");
+  plan.push({
+    id: "closing_game",
+    priority: 2,
+    title: "Closing-game routine (16+)",
+    why:
+      clutchLeak.valueLabel === "—"
+        ? "Build a default closing-game script before pressure data is available."
+        : `Clutch UE deficit: ${clutchLeak.valueLabel}. Risk creeps up with the score.`,
+    drills: [
+      "Start sets at 18-18 in practice; play to 21 — three rounds, log UE rate.",
+      "Define a 'safe serve + 3rd shot' you'll always play at 19+.",
+      "Deep-breath + bounce-shuttle reset before every clutch serve.",
+    ],
+    severity: clutchLeak.severity,
+    confidence: conf.level,
+  });
+
+  // 3. Serve + third shot
+  const threeShotLeak = findLeak("three_shot_win");
+  plan.push({
+    id: "serve_third",
+    priority: 3,
+    title: "Serve + third-shot pattern",
+    why:
+      threeShotLeak.valueLabel === "—"
+        ? "Capture more service points to pin down the best serve→3rd-shot combo."
+        : `3-shot win rate is ${threeShotLeak.value}% (target ≥ ${BENCHMARKS.THREE_SHOT_WIN_TARGET_PCT}%). ` +
+          `Closing the rally inside three shots is the easiest free point.`,
+    drills: [
+      "Serve to T → expect lift → SM cross. Run 30 reps.",
+      "Drive serve once a set as a surprise weapon, no more.",
+      "Tag every serve's height + depth quality during a session — find the variant the opponent struggles with.",
+    ],
+    severity: threeShotLeak.severity,
+    confidence: conf.level,
+  });
+
+  // 4. Neutral-to-pressure conversion (effectiveness gap)
+  const effLeak = findLeak("effective_gap");
+  const neutralHigh = eff.total > 0 && eff.nPct > BENCHMARKS.NEUTRAL_HIGH_PCT;
+  plan.push({
+    id: "neutral_to_pressure",
+    priority: 4,
+    title: "Convert neutral exchanges into pressure",
+    why:
+      eff.total === 0
+        ? "Tag shot quality (E/N/I) during capture to expose where the rally goes neutral."
+        : neutralHigh
+        ? `Neutral share is ${eff.nPct}% (>${BENCHMARKS.NEUTRAL_HIGH_PCT}%). Too many rallies stay flat instead of building pressure.`
+        : `Effective share is ${eff.ePct}% (target ≥ ${BENCHMARKS.EFFECTIVE_TARGET_PCT}%). Push more shots into Effective.`,
+    drills: [
+      "Mid-court slice or push to break the neutral pattern; reward yourself for tagging the next shot Effective.",
+      "Half-smash from the rear corner once per long rally — force opponent into a lift.",
+      "Net-shot + recovery split-step routine to get to the front first.",
+    ],
+    severity: effLeak.severity,
+    confidence: conf.level,
+  });
+
+  // 5. Validate zone weakness — emphasis on data capture, not the claim itself.
+  plan.push({
+    id: "zone_weakness",
+    priority: 5,
+    title: zw.supportedBackhandClaim
+      ? "Drill backhand rear court (evidence supported)"
+      : "Validate suspected zone weakness",
+    why: zw.finding,
+    drills: zw.supportedBackhandClaim
+      ? [
+          "Round-the-head forehand from BH corner — 3 sets of 10.",
+          "Backhand clear to Z9 cross — partner feeds drops to Z7.",
+          "Footwork ladder: BH-corner recovery to mid-court within 2 steps.",
+        ]
+      : [
+          "During next session, capture originZone for every error.",
+          "Tag bodySide (forehand / backhand) on the last shot of each lost rally.",
+          "Add a contactQuality tag (clean / late / stretched / offbalance) so technical attribution is possible.",
+        ],
+    severity: zw.totalErrors === 0 ? "low" : "medium",
+    confidence: conf.level,
+  });
+
+  // Add an extra prescription only if score-pressure has a non-trivial signal.
+  if (sp.total >= 1) {
+    const dom = ["mental", "physical", "tactical", "mixed"]
+      .map((k) => ({ k, n: sp.counts[k] }))
+      .sort((a, b) => b.n - a.n)[0];
+    if (dom && dom.n >= 1) {
+      plan.push({
+        id: `pressure_${dom.k}`,
+        priority: 6,
+        title: `Score-pressure follow-up: ${dom.k} collapses`,
+        why:
+          `${dom.n} loss-streak chunk${dom.n !== 1 ? "s" : ""} classified ${dom.k}. Targeted reset routine.`,
+        drills:
+          dom.k === "physical"
+            ? ["Insert a high defensive clear after rallies > 15 shots.", "Conditioning ladder: 6×400m + footwork sets."]
+            : dom.k === "tactical"
+            ? ["Drill counter-attack from defensive postures.", "Watch tape: identify which shot the opponent hits clean."]
+            : dom.k === "mixed"
+            ? ["Two-week mix of conditioning + reset routines.", "Re-evaluate after next 3 matches."]
+            : [
+                "Point-by-point reset: breathe, bounce shuttle, look at back line, serve.",
+                "Pre-serve cue word — pick one and use it on every clutch point.",
+              ],
+        severity:
+          dom.k === "tactical" || dom.k === "mixed"
+            ? "high"
+            : dom.n >= 2 ? "high" : "medium",
+        confidence: conf.level,
+      });
+    }
+  }
+
+  return plan;
 };
 
 // ===================================================================
@@ -830,6 +1304,163 @@ export const momentumChunks = (rallies) => {
   };
 };
 
+// ---------- 6. Score-pressure / loss-streak classification (Phase 6) ----------
+// Walks rallies in capture order, finds runs of 3+ son losses (same shape
+// as momentumChunks), but classifies each chunk into:
+//
+//   mental   — focus/decision collapse (avg rally <= 10, UE >= 50%, length >= 3)
+//   physical — fitness collapse (avg rally > 12 OR previous rally > 15)
+//   tactical — opponent winners/forced errors dominate (opp W/FE >= 60%)
+//   mixed    — multiple of the above true
+//   unclassified — none triggered
+//
+// Returns: { chunks: [...], counts: {mental, physical, tactical, mixed, unclassified}, total }
+export const analyzeScorePressure = (rallies) => {
+  const chunks = [];
+  let i = 0;
+  while (i < rallies.length) {
+    if (rallies[i].pointWonBy !== "O") { i++; continue; }
+    const start = i;
+    while (i < rallies.length && rallies[i].pointWonBy === "O") i++;
+    const end = i - 1;
+    const length = end - start + 1;
+    if (length < 3) continue;
+    const chunkRallies = rallies.slice(start, end + 1);
+
+    const avgLen = +(
+      chunkRallies.reduce((a, r) => a + r.shots.length, 0) / chunkRallies.length
+    ).toFixed(1);
+
+    const ueCount = chunkRallies.filter(isSonUE).length;
+    const ueRate = pct(ueCount, chunkRallies.length);
+
+    // Opp dominance: rallies opponent won as W or where Son's last shot was
+    // a forced error against him (FE with opp winning).
+    const oppDominated = chunkRallies.filter(
+      (r) => (r.result === "W" && r.pointWonBy === "O") ||
+             (r.result === "FE" && r.pointWonBy === "O"),
+    ).length;
+    const oppDomRate = pct(oppDominated, chunkRallies.length);
+
+    const prev = start > 0 ? rallies[start - 1] : null;
+    const prevLen = prev?.shots.length || 0;
+
+    // Rule application — a chunk can fire multiple rules.
+    const reasons = [];
+    if (length >= 3 && ueRate >= 50 && avgLen <= 10) reasons.push("mental");
+    if (avgLen > 12 || prevLen > 15) reasons.push("physical");
+    if (oppDomRate >= 60) reasons.push("tactical");
+
+    const classification =
+      reasons.length === 0 ? "unclassified"
+      : reasons.length === 1 ? reasons[0]
+      : "mixed";
+
+    chunks.push({
+      startIdx: start,
+      endIdx: end,
+      length,
+      set: chunkRallies[0].set,
+      scores: chunkRallies.map((r) => r.score),
+      avgLen,
+      ueRate,
+      ueCount,
+      oppDominated,
+      oppDomRate,
+      prevLen,
+      classification,
+      reasons,
+    });
+  }
+
+  const countBy = (k) => chunks.filter((c) => c.classification === k).length;
+  return {
+    chunks,
+    counts: {
+      mental: countBy("mental"),
+      physical: countBy("physical"),
+      tactical: countBy("tactical"),
+      mixed: countBy("mixed"),
+      unclassified: countBy("unclassified"),
+    },
+    total: chunks.length,
+  };
+};
+
+// ---------- 7. Kill-chain analysis (Phase 9) ----------
+// For rallies Son ended as Winner OR rallies Son won via opponent forced
+// error, group setups of length 1, 2, or 3 leading to the finish. Patterns
+// are only labelled "repeatable" when their count >= PATTERN_MIN_COUNT.
+//
+// Caller can ask for a single setup length via `setupLen`, or the bundled
+// version via analyzeKillChains() which returns all three.
+export const killChainSetups = (rallies, setupLen = 3) => {
+  const counts = new Map();
+  let totalFinishes = 0;
+
+  for (const r of rallies) {
+    const finish = r.shots[r.shots.length - 1];
+    if (!finish) continue;
+    // Son finished the rally via Winner (W with pointWonBy S) or by Opp's
+    // forced error (FE with pointWonBy S).
+    const sonFinished =
+      r.pointWonBy === "S" && (r.result === "W" || r.result === "FE");
+    if (!sonFinished) continue;
+    if (r.shots.length < setupLen + 1) continue;
+
+    totalFinishes++;
+    const setupShots = r.shots.slice(-1 - setupLen, -1);
+    const setupKey = setupShots
+      .map((s) => `${s.shotType || "?"}${s.zone ? `·Z${s.zone}` : ""}`)
+      .join(" → ");
+    const finishKey = `${finish.shotType || "?"}${finish.zone ? `·Z${finish.zone}` : ""}`;
+    const key = `${setupKey} → ${finishKey}`;
+    if (!counts.has(key)) {
+      counts.set(key, {
+        key,
+        setup: setupKey,
+        finish: finishKey,
+        finishShot: finish.shotType,
+        finishZone: finish.zone,
+        finishResult: r.result, // "W" or "FE"
+        count: 0,
+      });
+    }
+    counts.get(key).count++;
+  }
+
+  const all = [...counts.values()].sort((a, b) => b.count - a.count);
+  const repeatable = all.filter((p) => p.count >= PATTERN_MIN_COUNT);
+  return {
+    setupLen,
+    totalFinishes,
+    all,
+    repeatable,
+    // Convenience: the dominant pattern, if it's repeatable.
+    top: all[0] || null,
+    hasRepeatable: repeatable.length > 0,
+  };
+};
+
+export const analyzeKillChains = (rallies) => {
+  const oneShot   = killChainSetups(rallies, 1);
+  const twoShot   = killChainSetups(rallies, 2);
+  const threeShot = killChainSetups(rallies, 3);
+  const anyRepeatable =
+    oneShot.hasRepeatable || twoShot.hasRepeatable || threeShot.hasRepeatable;
+  return {
+    oneShot,
+    twoShot,
+    threeShot,
+    anyRepeatable,
+    finding: anyRepeatable
+      ? "Repeatable point-construction patterns detected — these are reliable setups."
+      : oneShot.totalFinishes + twoShot.totalFinishes + threeShot.totalFinishes > 0
+      ? "Winners exist, but repeatable point-construction patterns are not yet established."
+      : "No winning finishes captured yet.",
+  };
+};
+
 // One-shot bundler for the report.
 export const advancedInsights = (rallies) => ({
   displacement: displacementIndex(rallies),
@@ -837,7 +1468,228 @@ export const advancedInsights = (rallies) => ({
   serveROI: serveROI(rallies),
   recoveryLeak: recoveryLeak(rallies),
   momentum: momentumChunks(rallies),
+  scorePressure: analyzeScorePressure(rallies),
+  killChainAnalysis: analyzeKillChains(rallies),
 });
+
+// ===================================================================
+//  SAMPLE CONFIDENCE
+//  How much should the reader trust a finding given the data we've got?
+//  Returns a coarse band so we can annotate every section that's
+//  sensitive to small N: zone findings, serve findings, playing style,
+//  clutch findings, cross-tournament trends.
+// ===================================================================
+export const computeSampleConfidence = (matches) => {
+  const matchesCount = matches?.length || 0;
+  const ralliesCount = (matches || []).reduce(
+    (a, m) => a + (m.rallies?.length || 0),
+    0,
+  );
+
+  let level;
+  if (
+    matchesCount < SAMPLE_CONFIDENCE.VERY_LOW_MAX_MATCHES ||
+    ralliesCount < SAMPLE_CONFIDENCE.VERY_LOW_MAX_RALLIES
+  ) {
+    level = "very_low";
+  } else if (
+    matchesCount < SAMPLE_CONFIDENCE.LOW_MAX_MATCHES ||
+    ralliesCount < SAMPLE_CONFIDENCE.LOW_MAX_RALLIES
+  ) {
+    level = "low";
+  } else if (
+    matchesCount < SAMPLE_CONFIDENCE.MEDIUM_MAX_MATCHES ||
+    ralliesCount < SAMPLE_CONFIDENCE.MEDIUM_MAX_RALLIES
+  ) {
+    level = "medium";
+  } else {
+    level = "high";
+  }
+
+  // Per spec: "very low" must surface as "directional only" so we never
+  // over-claim from a single match.
+  const labels = {
+    very_low: "directional only",
+    low: "low confidence",
+    medium: "medium confidence",
+    high: "high confidence",
+  };
+  const tones = {
+    very_low: "warn",
+    low: "warn",
+    medium: "info",
+    high: "good",
+  };
+
+  return {
+    level,
+    label: labels[level],
+    tone: tones[level],
+    matches: matchesCount,
+    rallies: ralliesCount,
+    // Convenience flags for callers.
+    isDirectional: level === "very_low",
+    isStrong: level === "high",
+  };
+};
+
+// Map a confidence level to the wording suffix we use on a single finding.
+export const confidenceSuffix = (level) => {
+  switch (level) {
+    case "very_low": return "directional only";
+    case "low":      return "low confidence";
+    case "medium":   return "medium confidence";
+    case "high":     return "high confidence";
+    default:         return "";
+  }
+};
+
+// ===================================================================
+//  PERFORMANCE LEAK ENGINE
+//  Ranks the five most actionable leaks for the player. Output is a
+//  stable-shape array of { id, title, value, valueLabel, severity,
+//  detail }, sorted in priority order:
+//    1. UE rate
+//    2. Clutch UE deficit (clutch UE% − overall UE%)
+//    3. Late-set UE increase (second-half rate vs first-half)
+//    4. 3-shot win rate (must beat THREE_SHOT_WIN_TARGET_PCT)
+//    5. Effectiveness gap (E% vs target)
+//
+//  Severity bands re-use uePctSeverity for the UE-rate leak, and use
+//  comparable thresholds for the others so the report colouring stays
+//  consistent.
+// ===================================================================
+
+const overallUePct = (rallies) => {
+  if (!rallies.length) return 0;
+  const ue = rallies.filter((r) => r.result === "UE" && r.pointWonBy === "O").length;
+  return Math.round((ue / rallies.length) * 100);
+};
+
+// Severity for non-UE-rate leaks: deficit / gap measured in percentage
+// points where bigger = worse.
+const ppSeverity = (deltaPp) => {
+  if (deltaPp >= 15) return "critical";
+  if (deltaPp >= 10) return "high";
+  if (deltaPp >= 5)  return "medium";
+  return "low";
+};
+
+// 3-shot win rate severity: distance below target.
+const threeShotSeverity = (winPct) => {
+  const gap = BENCHMARKS.THREE_SHOT_WIN_TARGET_PCT - winPct;
+  if (gap >= 25) return "critical";
+  if (gap >= 15) return "high";
+  if (gap >= 5)  return "medium";
+  return "low";
+};
+
+// Effectiveness gap severity: distance below target.
+const effectivenessSeverity = (ePct) => {
+  const gap = BENCHMARKS.EFFECTIVE_TARGET_PCT - ePct;
+  if (gap >= 20) return "critical";
+  if (gap >= 10) return "high";
+  if (gap >= 3)  return "medium";
+  return "low";
+};
+
+export const analyzePerformanceLeaks = (matches) => {
+  const rallies = (matches || []).flatMap((m) => m.rallies || []);
+  const leaks = [];
+
+  // 1. UE rate
+  const uePct = overallUePct(rallies);
+  leaks.push({
+    id: "ue_rate",
+    rank: 1,
+    title: "Unforced-error rate",
+    value: uePct,
+    valueLabel: `${uePct}%`,
+    target: `≤ ${BENCHMARKS.UE_TARGET_PCT}%`,
+    severity: uePctSeverity(uePct),
+    detail:
+      `${rallies.filter((r) => r.result === "UE" && r.pointWonBy === "O").length} ` +
+      `unforced errors across ${rallies.length} rallies. ` +
+      `Target ${BENCHMARKS.UE_TARGET_PCT}% — keep risky finish patterns rare and tighten last-shot quality.`,
+  });
+
+  // 2. Clutch UE deficit
+  const clutch = clutchStats(rallies);
+  leaks.push({
+    id: "clutch_ue",
+    rank: 2,
+    title: "Clutch UE deficit (16+ vs overall)",
+    value: clutch.deficit,
+    valueLabel: `${clutch.clutchUEPct}% vs ${clutch.overallUEPct}% (Δ ${clutch.deficit >= 0 ? "+" : ""}${clutch.deficit}pp)`,
+    target: `≤ ${BENCHMARKS.CLUTCH_DEFICIT_WARN_PP}pp`,
+    severity: ppSeverity(Math.max(0, clutch.deficit)),
+    detail:
+      clutch.clutchPoints === 0
+        ? "No clutch points captured yet."
+        : `Under 16+ pressure, UE rate is ${clutch.clutchUEPct}% vs ${clutch.overallUEPct}% baseline ` +
+          `(${clutch.clutchPoints} clutch points). Drill closing-game scripts to keep risk constant.`,
+  });
+
+  // 3. Late-set UE increase (first vs second half of each set)
+  const fatigue = fatigueStats(matches || []);
+  const lateDelta = (fatigue.secondHalf.rate || 0) - (fatigue.firstHalf.rate || 0);
+  leaks.push({
+    id: "late_ue",
+    rank: 3,
+    title: "Late-set UE increase",
+    value: lateDelta,
+    valueLabel:
+      fatigue.firstHalf.points && fatigue.secondHalf.points
+        ? `${fatigue.firstHalf.rate}% → ${fatigue.secondHalf.rate}% (Δ ${lateDelta >= 0 ? "+" : ""}${lateDelta}pp)`
+        : "—",
+    target: "no rise in 2nd half",
+    severity: ppSeverity(Math.max(0, lateDelta)),
+    detail:
+      fatigue.firstHalf.points && fatigue.secondHalf.points
+        ? `Second-half UE rate is ${lateDelta >= 0 ? "up" : "down"} ${Math.abs(lateDelta)}pp ` +
+          `vs first half. Conditioning + safe-shot defaults late.`
+        : "Need both halves of a set with rallies to assess.",
+  });
+
+  // 4. 3-shot win rate
+  const sr = serveReturnStats(rallies);
+  leaks.push({
+    id: "three_shot_win",
+    rank: 4,
+    title: "3-shot opening win rate",
+    value: sr.threeShotWinPct,
+    valueLabel:
+      sr.threeShotPoints === 0
+        ? "—"
+        : `${sr.threeShotWinPct}% (${sr.threeShotWon}/${sr.threeShotPoints})`,
+    target: `≥ ${BENCHMARKS.THREE_SHOT_WIN_TARGET_PCT}%`,
+    severity: sr.threeShotPoints === 0 ? "low" : threeShotSeverity(sr.threeShotWinPct),
+    detail:
+      sr.threeShotPoints === 0
+        ? "No service points captured yet."
+        : `Closing serves in ≤ 3 shots wins ${sr.threeShotWinPct}% — target ` +
+          `${BENCHMARKS.THREE_SHOT_WIN_TARGET_PCT}%. Build a deliberate serve→3rd-shot pattern.`,
+  });
+
+  // 5. Effectiveness gap (E% vs target)
+  const eff = effectivenessBreakdown(rallies);
+  leaks.push({
+    id: "effective_gap",
+    rank: 5,
+    title: "Effective-shot share vs target",
+    value: eff.ePct,
+    valueLabel: eff.total === 0 ? "—" : `E ${eff.ePct}% · N ${eff.nPct}% · I ${eff.iPct}%`,
+    target: `≥ ${BENCHMARKS.EFFECTIVE_TARGET_PCT}% Effective`,
+    severity: eff.total === 0 ? "low" : effectivenessSeverity(eff.ePct),
+    detail:
+      eff.total === 0
+        ? "Quality tagging (E/N/I) not yet captured."
+        : `Pro target is ${BENCHMARKS.EFFECTIVE_TARGET_PCT}% Effective; player at ${eff.ePct}%. ` +
+          `If Neutral > ${BENCHMARKS.NEUTRAL_HIGH_PCT}% the player is rallying passively — convert neutral exchanges into pressure.`,
+  });
+
+  return leaks;
+};
 
 // ===================================================================
 //  OPPONENT / SCOUTING DERIVATIONS

@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { useMatchStore } from "../store/useMatchStore.js";
-import { reportBundle, matchSummary, classifyStyle, setAggregate, pct, listTournaments } from "../lib/analytics.js";
+import { reportBundle, matchSummary, classifyStyle, setAggregate, pct, listTournaments, computeSampleConfidence } from "../lib/analytics.js";
 import { SHOT_NAMES, ZONE_LABELS } from "../constants/badminton.js";
 import { Screen, TopBar, Card, BigBtn, Badge } from "../components/ui.jsx";
 import { performanceReportMarkdown, copyMarkdown, downloadMarkdown, slugify } from "../lib/markdown.js";
@@ -91,9 +91,10 @@ export default function Report({ setScreen }) {
     ? `Match ${scope.slice(6)}`
     : "Full career";
 
-  const { agg, tournaments, distribution, lengthProfile, serveReturn,
+  const { agg, tournaments, distribution, lengthProfile, bestLengthBucket, serveReturn,
           clutch, fatigue, deception, effectiveness,
-          winnerZones, errorZonesAll, allZones, recs, advanced } = bundle;
+          winnerZones, errorZonesAll, allZones, recs, advanced, confidence,
+          leaks, serveThirdShot, zoneWeakness, trainingPlan } = bundle;
   const wonMatches = matches.filter((m) => {
     const setsWon = m.sets.filter((s) => s.sonScore > s.oppScore).length;
     return setsWon > m.sets.length / 2;
@@ -171,12 +172,31 @@ export default function Report({ setScreen }) {
         <h1 className="text-2xl sm:text-3xl font-extrabold text-emerald-400 print:text-black">
           {playerName} — Comprehensive analysis
         </h1>
-        <div className="text-xs text-neutral-400 mt-1">
-          {tournaments.length} tournament{tournaments.length !== 1 ? "s" : ""} ·{" "}
-          {matches.length} matches · {agg.rallies} rallies ·{" "}
-          Generated {new Date().toLocaleDateString()}
+        <div className="text-xs text-neutral-400 mt-1 flex flex-wrap items-center gap-x-2 gap-y-1">
+          <span>
+            {tournaments.length} tournament{tournaments.length !== 1 ? "s" : ""} ·{" "}
+            {matches.length} matches · {agg.rallies} rallies ·{" "}
+            Generated {new Date().toLocaleDateString()}
+          </span>
+          <ConfidenceChip confidence={confidence} />
         </div>
       </div>
+
+      {/* ---------- Pro-Level Findings ---------- */}
+      <ProLevelFindings
+        confidence={confidence}
+        leaks={leaks}
+        bestLengthBucket={bestLengthBucket}
+        clutch={clutch}
+        scorePressure={advanced.scorePressure}
+        serveThirdShot={serveThirdShot}
+        serveReturn={serveReturn}
+        effectiveness={effectiveness}
+        zoneWeakness={zoneWeakness}
+        deception={deception}
+        killChainAnalysis={advanced.killChainAnalysis}
+        trainingPlan={trainingPlan}
+      />
 
       {/* ---------- TOC ---------- */}
       <Card className="mb-5 print:break-after-page">
@@ -248,7 +268,8 @@ export default function Report({ setScreen }) {
       {/* 2. Court heatmaps */}
       <SH id="a2" n="2" t="Court heatmaps" />
       <p className="text-xs text-neutral-400 mb-3">
-        Zone frequency maps aggregated across every captured rally. Darker = more activity.
+        Zone frequency maps aggregated across every captured rally. Darker = more activity.{" "}
+        <ConfidenceChip confidence={confidence} />
       </p>
       <Grid c={3}>
         <div><MiniLabel>All shot targets</MiniLabel><HGrid data={allZones} tone="sky" /></div>
@@ -301,13 +322,11 @@ export default function Report({ setScreen }) {
           );
         })}
       </Grid>
-      <Insight>
-        Win rate is highest in short rallies — he's an attacking player most effective when finishing early.
-        Dips in longer rallies point to fitness or patience limits.
-      </Insight>
+      <RallyLengthInsight best={bestLengthBucket} />
 
       {/* 5. Serve & return */}
       <SH id="a5" n="5" t="Serve & return game" />
+      <div className="mb-2"><ConfidenceChip confidence={confidence} /></div>
       <Grid c={3}>
         <Stat
           l="Serve win %"
@@ -331,6 +350,7 @@ export default function Report({ setScreen }) {
 
       {/* 6. Clutch */}
       <SH id="a6" n="6" t="Clutch performance (16–21)" />
+      <div className="mb-2"><ConfidenceChip confidence={confidence} /></div>
       <Grid c={3}>
         <Stat l="Clutch points" v={clutch.clutchPoints} />
         <Stat l="Clutch win %" v={`${clutch.clutchWinPct}%`} tone={clutch.clutchWinPct >= 50 ? "good" : "bad"} />
@@ -413,14 +433,26 @@ export default function Report({ setScreen }) {
       {/* 9. Predictability & deception */}
       <SH id="a9" n="9" t="Predictability & deception" />
       <Grid c={3}>
-        <Stat l="Holds (HS)" v={deception.holds} s={`in ${matches.length} match${matches.length !== 1 ? "es" : ""}`} tone="warn" />
+        <Stat l="Half-smashes (HS)" v={deception.halfSmashes} s={`in ${matches.length} match${matches.length !== 1 ? "es" : ""}`} tone="warn" />
         <Stat l="Slices (SL)" v={deception.slices} s={`in ${matches.length} match${matches.length !== 1 ? "es" : ""}`} tone="warn" />
-        <Stat l="Per-match deception" v={deception.perMatch} s="shots / match" tone={deception.perMatch >= 3 ? "good" : "warn"} />
+        <Stat l="Variation / match" v={deception.perMatch} s="HS + SL + tagged deception" tone={deception.perMatch >= 3 ? "good" : "warn"} />
       </Grid>
+      {deception.hasAdvancedTagging ? (
+        <Grid c={4}>
+          <Stat l="Holds" v={deception.holds} tone="warn" />
+          <Stat l="Delays" v={deception.delays} tone="warn" />
+          <Stat l="Double motion" v={deception.doubleMotion} tone="warn" />
+          <Stat l="Disguised" v={deception.disguised} tone="warn" />
+        </Grid>
+      ) : (
+        <Flag>
+          Hold/delay deception is not tracked unless advanced deception tagging is used.
+          Tag shots with <code className="font-mono text-emerald-300">deceptionType</code> (hold / delay / double_motion / disguised) during capture to populate this section.
+        </Flag>
+      )}
       {deception.perMatch < 3 && matches.length >= 2 && (
         <Flag>
-          Fewer than 3 deception shots per match. Introduce holds and slices gradually —
-          unpredictability creates openings against disciplined opponents.
+          Fewer than 3 variation shots per match. HS and SL bring power deception; tagged holds/delays bring timing deception — both pry openings against disciplined opponents.
         </Flag>
       )}
 
@@ -554,6 +586,10 @@ export default function Report({ setScreen }) {
 function TournamentBlock({ t, index }) {
   const ts = useMemo(() => setAggregate(t.rallies), [t]);
   const style = classifyStyle(ts.shots);
+  const tournamentConfidence = useMemo(
+    () => computeSampleConfidence(t.matches),
+    [t.matches],
+  );
   const wins = t.matches.filter((m) => {
     const setsWon = m.sets.filter((s) => s.sonScore > s.oppScore).length;
     return setsWon > m.sets.length / 2;
@@ -579,6 +615,7 @@ function TournamentBlock({ t, index }) {
         <MiniLabel>Playing style this tournament</MiniLabel>
         <div className="font-bold text-lg text-white">{style.style}</div>
         <div className="text-xs text-neutral-400">{style.desc}</div>
+        <div className="mt-2"><ConfidenceChip confidence={tournamentConfidence} /></div>
       </div>
 
       {t.matches.map((m) => <MatchBlock key={m.id} match={m} />)}
@@ -668,6 +705,207 @@ function reduceZones(rallies, kind) {
 // ===================================================================
 //                        INLINE COMPONENTS
 // ===================================================================
+
+// ===================================================================
+//                      PRO-LEVEL FINDINGS (Phase 11)
+//  Renders the deterministic pro-level findings near the top of the
+//  report. Each card is driven entirely by the bundle — the same data
+//  used by the markdown export, so on-screen and exported reports stay
+//  in sync.
+// ===================================================================
+function ProLevelFindings({
+  confidence, leaks, bestLengthBucket, clutch, scorePressure,
+  serveThirdShot, serveReturn, effectiveness, zoneWeakness,
+  deception, killChainAnalysis, trainingPlan,
+}) {
+  const sevTone = {
+    critical: "bad",
+    high: "warn",
+    medium: "warn",
+    low: "default",
+  };
+
+  return (
+    <Card className="mb-5 print:break-after-page">
+      <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
+        <div>
+          <div className="text-[10px] uppercase tracking-[0.22em] text-emerald-400 font-semibold">Pro-level findings</div>
+          <div className="text-base font-bold text-white print:text-black">10-section deterministic snapshot</div>
+        </div>
+        <ConfidenceChip confidence={confidence} />
+      </div>
+
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+        {/* 1. Data Confidence */}
+        <FindingCard n={1} title="Data confidence">
+          <div className="text-xs text-neutral-300 print:text-black">
+            <b>{confidence.label}</b> — {confidence.matches} match{confidence.matches !== 1 ? "es" : ""},{" "}
+            {confidence.rallies} rallies.
+          </div>
+          {confidence.isDirectional && (
+            <div className="text-[11px] text-amber-300 mt-1">Findings should be read as directional only.</div>
+          )}
+        </FindingCard>
+
+        {/* 2. Top Performance Leaks */}
+        <FindingCard n={2} title="Top performance leaks">
+          <div className="flex flex-col gap-1">
+            {leaks.slice(0, 3).map((l) => (
+              <div key={l.id} className="flex items-center justify-between gap-2">
+                <span className="text-xs text-neutral-200 truncate print:text-black">{l.title}</span>
+                <span className="flex items-center gap-1 shrink-0">
+                  <span className="text-[10px] text-neutral-500 font-mono">{l.valueLabel}</span>
+                  <SeverityPill severity={l.severity} />
+                </span>
+              </div>
+            ))}
+          </div>
+        </FindingCard>
+
+        {/* 3. Rally-Length Truth */}
+        <FindingCard n={3} title="Rally-length truth">
+          {bestLengthBucket.bucket ? (
+            <div className="text-xs text-neutral-300 print:text-black">
+              Best win rate in <b>{bestLengthBucket.bucket}-shot</b> rallies — {bestLengthBucket.winPct}%
+              ({bestLengthBucket.won}W / {bestLengthBucket.lost}L from {bestLengthBucket.total} rallies).
+              {!bestLengthBucket.strong && (
+                <span className="block text-[11px] text-amber-300 mt-0.5">Sample size small — directional.</span>
+              )}
+            </div>
+          ) : (
+            <div className="text-xs text-neutral-500 print:text-black">Not enough rallies to call out a strongest length range yet.</div>
+          )}
+        </FindingCard>
+
+        {/* 4. Pressure & Closing Ability */}
+        <FindingCard n={4} title="Pressure & closing">
+          <div className="text-xs text-neutral-300 print:text-black">
+            Clutch UE {clutch.clutchUEPct}% vs overall {clutch.overallUEPct}% (Δ {clutch.deficit >= 0 ? "+" : ""}{clutch.deficit}pp).
+            Clutch win {clutch.clutchWinPct}% across {clutch.clutchPoints} pts.
+          </div>
+          {scorePressure && scorePressure.total > 0 && (
+            <div className="text-[11px] text-neutral-500 mt-1">
+              Loss-streak chunks: {scorePressure.counts.mental}M · {scorePressure.counts.physical}P ·{" "}
+              {scorePressure.counts.tactical}T · {scorePressure.counts.mixed}X.
+            </div>
+          )}
+        </FindingCard>
+
+        {/* 5. Serve + Third Shot */}
+        <FindingCard n={5} title="Serve + third shot">
+          <div className="text-xs text-neutral-300 print:text-black">
+            3-shot win {serveReturn.threeShotWinPct}% ({serveReturn.threeShotWon}/{serveReturn.threeShotPoints}).
+          </div>
+          {serveThirdShot.length > 0 ? (
+            <div className="text-[11px] text-neutral-500 mt-1">
+              {serveThirdShot.length} (serve, target) bucket{serveThirdShot.length !== 1 ? "s" : ""} captured.
+            </div>
+          ) : (
+            <div className="text-[11px] text-amber-300 mt-1">
+              No serveTarget data captured — tag during next session for a richer table.
+            </div>
+          )}
+        </FindingCard>
+
+        {/* 6. Neutral-to-Pressure Conversion */}
+        <FindingCard n={6} title="Neutral-to-pressure conversion">
+          {effectiveness.total === 0 ? (
+            <div className="text-xs text-amber-300 print:text-black">Tag shots E/N/I to power this finding.</div>
+          ) : (
+            <div className="text-xs text-neutral-300 print:text-black">
+              E {effectiveness.ePct}% · N {effectiveness.nPct}% · I {effectiveness.iPct}%.
+              {effectiveness.nPct > 60 && (
+                <span className="block text-[11px] text-amber-300 mt-0.5">
+                  Neutral &gt; 60% — rallies stay flat instead of building pressure.
+                </span>
+              )}
+            </div>
+          )}
+        </FindingCard>
+
+        {/* 7. Zone Weakness Confidence */}
+        <FindingCard n={7} title="Zone weakness confidence">
+          <div className="text-xs text-neutral-300 print:text-black">{zoneWeakness.finding}</div>
+          {!zoneWeakness.supportedBackhandClaim && zoneWeakness.totalErrors > 0 && (
+            <div className="text-[11px] text-amber-300 mt-1">
+              Capture <code className="font-mono">originZone</code>, <code className="font-mono">bodySide</code>,
+              and <code className="font-mono">contactQuality</code> to confirm.
+            </div>
+          )}
+        </FindingCard>
+
+        {/* 8. Deception & Variation */}
+        <FindingCard n={8} title="Deception & variation">
+          <div className="text-xs text-neutral-300 print:text-black">
+            HS {deception.halfSmashes} · SL {deception.slices}.
+            {deception.hasAdvancedTagging
+              ? ` Hold ${deception.holds} · Delay ${deception.delays} · Disguised ${deception.disguised}.`
+              : ""}
+          </div>
+          {!deception.hasAdvancedTagging && (
+            <div className="text-[11px] text-amber-300 mt-1">
+              Hold/delay deception is not tracked unless advanced deception tagging is used.
+            </div>
+          )}
+        </FindingCard>
+
+        {/* 9. Kill chains */}
+        <FindingCard n={9} title="Kill chains">
+          <div className="text-xs text-neutral-300 print:text-black">{killChainAnalysis.finding}</div>
+          {killChainAnalysis.anyRepeatable && (
+            <div className="text-[11px] text-emerald-300 mt-1">
+              Repeatable: 1-shot {killChainAnalysis.oneShot.repeatable.length} ·
+              {" "}2-shot {killChainAnalysis.twoShot.repeatable.length} ·
+              {" "}3-shot {killChainAnalysis.threeShot.repeatable.length}.
+            </div>
+          )}
+        </FindingCard>
+
+        {/* 10. Training prescription */}
+        <FindingCard n={10} title="Training prescription">
+          <div className="flex flex-col gap-1">
+            {trainingPlan.slice(0, 3).map((p) => (
+              <div key={p.id} className="flex items-center justify-between gap-2">
+                <span className="text-xs text-neutral-200 truncate print:text-black">{p.priority}. {p.title}</span>
+                <SeverityPill severity={p.severity} />
+              </div>
+            ))}
+            {trainingPlan.length > 3 && (
+              <div className="text-[10px] text-neutral-500">+{trainingPlan.length - 3} more</div>
+            )}
+          </div>
+        </FindingCard>
+      </div>
+    </Card>
+  );
+
+  // Local helper — using the parent's tone map.
+  function SeverityPill({ severity }) {
+    const t = sevTone[severity] || "default";
+    const tones = {
+      bad:     "bg-red-950/60 text-red-300 border-red-800/70",
+      warn:    "bg-amber-950/60 text-amber-300 border-amber-800/70",
+      default: "bg-neutral-900 text-neutral-400 border-neutral-700",
+    };
+    return (
+      <span className={`px-1.5 py-0.5 rounded border text-[9px] font-bold uppercase tracking-wider ${tones[t]} print:bg-white print:text-black print:border-neutral-400`}>
+        {severity}
+      </span>
+    );
+  }
+}
+
+function FindingCard({ n, title, children }) {
+  return (
+    <div className="bg-neutral-900 border border-neutral-800 rounded-lg p-3 print:bg-white print:border-neutral-400">
+      <div className="flex items-baseline gap-2 mb-1.5">
+        <span className="text-[10px] font-mono text-emerald-400 print:text-black">{n}.</span>
+        <span className="text-[11px] uppercase tracking-wider font-semibold text-emerald-300 print:text-black">{title}</span>
+      </div>
+      {children}
+    </div>
+  );
+}
 
 function PartHeader({ label, title }) {
   return (
@@ -939,11 +1177,60 @@ function MiniLabel({ children }) {
   return <div className="text-[10px] uppercase tracking-wider font-semibold text-neutral-500 mb-1">{children}</div>;
 }
 
+// Compact confidence indicator — one chip rendered next to the report
+// header and (smaller) inline at the top of every confidence-sensitive
+// section. Single source of truth for tone.
+function ConfidenceChip({ confidence, compact = false }) {
+  if (!confidence) return null;
+  const tones = {
+    warn: "bg-amber-950/60 text-amber-300 border-amber-800/70 print:bg-amber-50 print:text-black print:border-amber-300",
+    info: "bg-sky-950/60 text-sky-300 border-sky-800/70 print:bg-sky-50 print:text-black print:border-sky-300",
+    good: "bg-emerald-950/60 text-emerald-300 border-emerald-800/70 print:bg-emerald-50 print:text-black print:border-emerald-300",
+  };
+  return (
+    <span
+      className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full border text-[10px] font-semibold uppercase tracking-wider ${
+        tones[confidence.tone] || tones.info
+      } ${compact ? "" : ""}`}
+    >
+      <span className="text-[8px] opacity-70">●</span>
+      <span>Confidence: {confidence.label}</span>
+      <span className="opacity-60 normal-case tracking-normal">
+        ({confidence.matches}m / {confidence.rallies}r)
+      </span>
+    </span>
+  );
+}
+
 function Insight({ children }) {
   return (
     <div className="bg-emerald-950/40 border border-emerald-800/70 rounded-md p-3 mt-3 text-xs text-emerald-200 leading-relaxed print:bg-emerald-50 print:text-black print:border-emerald-300">
       <b className="text-emerald-300 print:text-black">Key insight:</b> {children}
     </div>
+  );
+}
+
+// Data-driven insight for the rally-length section. Falls back to a neutral
+// message when no bucket has enough sample size — never claims "short
+// rallies are best" unless the data actually says so.
+function RallyLengthInsight({ best }) {
+  if (!best || !best.bucket) {
+    return (
+      <Insight>
+        Not enough rallies in any single length bucket yet to call out a strongest range.
+        Capture a few more matches to surface this insight.
+      </Insight>
+    );
+  }
+  const tone = best.strong ? "Insight" : "Directional";
+  return (
+    <Insight>
+      <b>{tone}:</b> Best win rate is in the <b>{best.bucket}-shot</b> bucket
+      ({best.winPct}% — {best.won}W/{best.lost}L from {best.total} rallies).
+      {!best.strong && (
+        <span className="text-neutral-400"> Sample size is small; treat as directional.</span>
+      )}
+    </Insight>
   );
 }
 

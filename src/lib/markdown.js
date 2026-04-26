@@ -91,9 +91,12 @@ export const matchAnalysisMarkdown = (match, { playerName = "Player" } = {}) => 
   }
 
   const bundle = reportBundle([match]);
-  const { agg, distribution, lengthProfile, serveReturn, clutch, fatigue,
+  const { agg, distribution, lengthProfile, bestLengthBucket, serveReturn, clutch, fatigue,
           deception, effectiveness, winnerZones, errorZonesAll, allZones,
-          recs, advanced } = bundle;
+          recs, advanced, confidence } = bundle;
+
+  md += confidenceCallout(confidence);
+  md += proLevelFindingsMarkdown(bundle);
 
   // Headline
   md += H2("Headline stats");
@@ -164,6 +167,7 @@ export const matchAnalysisMarkdown = (match, { playerName = "Player" } = {}) => 
     ["Bucket", "Won", "Lost", "Win %"],
     Object.entries(lengthProfile).map(([b, { w, l }]) => [`${b} shots`, w, l, `${pct(w, w + l)}%`])
   );
+  md += rallyLengthInsightMarkdown(bestLengthBucket);
 
   // Clutch
   md += H2("Clutch performance (16+)");
@@ -195,7 +199,18 @@ export const matchAnalysisMarkdown = (match, { playerName = "Player" } = {}) => 
 
   // Deception
   md += H2("Predictability & deception");
-  md += P(`Holds: ${deception.holds} · Slices: ${deception.slices} · Per-match: ${deception.perMatch}`);
+  md += P(
+    `Half-smashes: ${deception.halfSmashes} · Slices: ${deception.slices} · ` +
+    `Variation per match: ${deception.perMatch}`,
+  );
+  if (deception.hasAdvancedTagging) {
+    md += P(
+      `Tracked deception — holds: ${deception.holds}, delays: ${deception.delays}, ` +
+      `double motion: ${deception.doubleMotion}, disguised: ${deception.disguised}.`,
+    );
+  } else {
+    md += P("_Hold/delay deception is not tracked unless advanced deception tagging is used._");
+  }
 
   // Tactical cleverness
   md += H2("🧠 Tactical cleverness");
@@ -215,6 +230,137 @@ export const matchAnalysisMarkdown = (match, { playerName = "Player" } = {}) => 
 
   md += rawDataBlock(match);
   return md;
+};
+
+// Pro-Level Findings — same 10 sections as the on-screen report, in the
+// same order, driven entirely from the bundle.
+const proLevelFindingsMarkdown = (bundle) => {
+  const {
+    confidence, leaks, bestLengthBucket, clutch, serveReturn,
+    effectiveness, deception, zoneWeakness, trainingPlan, advanced,
+    serveThirdShot,
+  } = bundle;
+  const sp = advanced.scorePressure;
+  const kc = advanced.killChainAnalysis;
+
+  const sev = (s) => `\`${(s || "low").toUpperCase()}\``;
+
+  let md = H2("🏅 Pro-level findings");
+
+  md += H3("1. Data confidence");
+  md += P(
+    `**${confidence.label}** · ${confidence.matches} match${confidence.matches !== 1 ? "es" : ""} ` +
+    `· ${confidence.rallies} rallies.` +
+    (confidence.isDirectional ? " _Read findings as directional only._" : ""),
+  );
+
+  md += H3("2. Top performance leaks");
+  md += table(
+    ["#", "Leak", "Value", "Target", "Severity"],
+    leaks.map((l) => [l.rank, l.title, l.valueLabel, l.target, sev(l.severity)]),
+  );
+
+  md += H3("3. Rally-length truth");
+  md += rallyLengthInsightMarkdown(bestLengthBucket);
+
+  md += H3("4. Pressure & closing ability");
+  md += P(
+    `Clutch UE ${clutch.clutchUEPct}% vs overall ${clutch.overallUEPct}% ` +
+    `(Δ ${clutch.deficit >= 0 ? "+" : ""}${clutch.deficit}pp) · ` +
+    `Clutch win ${clutch.clutchWinPct}% across ${clutch.clutchPoints} points.`,
+  );
+  if (sp && sp.total > 0) {
+    md += P(
+      `Loss-streak chunks — mental: ${sp.counts.mental}, physical: ${sp.counts.physical}, ` +
+      `tactical: ${sp.counts.tactical}, mixed: ${sp.counts.mixed}.`,
+    );
+  }
+
+  md += H3("5. Serve + third shot");
+  md += P(
+    `3-shot win ${serveReturn.threeShotWinPct}% (${serveReturn.threeShotWon}/${serveReturn.threeShotPoints}).`,
+  );
+  if (serveThirdShot && serveThirdShot.length) {
+    md += table(
+      ["Serve", "Target", "Count", "Win %", "Weak return %", "Pressuring return %", "3rd-shot win %"],
+      serveThirdShot.map((row) => [
+        row.serveType, row.target, row.count, `${row.winPct}%`,
+        row.returns ? `${row.weakReturnPct}%` : "—",
+        row.returns ? `${row.pressuringReturnPct}%` : "—",
+        row.thirdShotPts ? `${row.thirdShotWinPct}%` : "—",
+      ]),
+    );
+  } else {
+    md += P("_No serveTarget data captured yet — tag during next session for a richer table._");
+  }
+
+  md += H3("6. Neutral-to-pressure conversion");
+  if (effectiveness.total === 0) {
+    md += P("_Tag shots E/N/I to power this finding._");
+  } else {
+    md += P(
+      `E ${effectiveness.ePct}% · N ${effectiveness.nPct}% · I ${effectiveness.iPct}%.` +
+      (effectiveness.nPct > 60
+        ? " _Neutral > 60% — rallies stay flat instead of building pressure._"
+        : ""),
+    );
+  }
+
+  md += H3("7. Zone weakness confidence");
+  md += P(zoneWeakness.finding);
+
+  md += H3("8. Deception & variation");
+  md += P(
+    `HS ${deception.halfSmashes} · SL ${deception.slices}.` +
+    (deception.hasAdvancedTagging
+      ? ` Hold ${deception.holds} · Delay ${deception.delays} · ` +
+        `Double motion ${deception.doubleMotion} · Disguised ${deception.disguised}.`
+      : " _Hold/delay deception is not tracked unless advanced deception tagging is used._"),
+  );
+
+  md += H3("9. Kill chains");
+  md += P(kc.finding);
+  if (kc.anyRepeatable) {
+    md += P(
+      `Repeatable patterns — 1-shot: ${kc.oneShot.repeatable.length}, ` +
+      `2-shot: ${kc.twoShot.repeatable.length}, 3-shot: ${kc.threeShot.repeatable.length}.`,
+    );
+  }
+
+  md += H3("10. Training prescription");
+  md += table(
+    ["#", "Title", "Severity", "Why"],
+    trainingPlan.map((p) => [p.priority, p.title, sev(p.severity), p.why]),
+  );
+
+  return md;
+};
+
+const confidenceCallout = (confidence) => {
+  if (!confidence) return "";
+  const note = confidence.isDirectional
+    ? "_Findings should be read as **directional only** until more data is captured._"
+    : confidence.isStrong
+    ? "_Findings have high statistical support across this scope._"
+    : "_Findings have moderate support — re-check after more matches._";
+  return P(
+    `> **Data confidence:** ${confidence.label} ` +
+    `(${confidence.matches} match${confidence.matches !== 1 ? "es" : ""} / ${confidence.rallies} rallies). ${note}`,
+  );
+};
+
+const rallyLengthInsightMarkdown = (best) => {
+  if (!best || !best.bucket) {
+    return P("_Not enough rallies in any bucket to identify a strongest length range yet._");
+  }
+  const tone = best.strong ? "Insight" : "Directional";
+  const caveat = best.strong
+    ? ""
+    : " _Sample size is small; treat as directional._";
+  return P(
+    `**${tone}:** Best win rate is in the **${best.bucket}-shot** bucket ` +
+    `(${best.winPct}% — ${best.won}W/${best.lost}L from ${best.total} rallies).${caveat}`
+  );
 };
 
 // ===================================================================
@@ -548,9 +694,12 @@ export const performanceReportMarkdown = (matches, { playerName = "Player", scop
   }
 
   const bundle = reportBundle(matches);
-  const { agg, distribution, lengthProfile, serveReturn, clutch, fatigue,
+  const { agg, distribution, lengthProfile, bestLengthBucket, serveReturn, clutch, fatigue,
           deception, effectiveness, winnerZones, errorZonesAll, allZones,
-          recs, advanced } = bundle;
+          recs, advanced, confidence } = bundle;
+
+  md += confidenceCallout(confidence);
+  md += proLevelFindingsMarkdown(bundle);
 
   // Per-match rollup
   md += H2("Match list");
@@ -616,6 +765,7 @@ export const performanceReportMarkdown = (matches, { playerName = "Player", scop
     ["Bucket", "Won", "Lost", "Win %"],
     Object.entries(lengthProfile).map(([b, { w, l }]) => [`${b} shots`, w, l, `${pct(w, w + l)}%`])
   );
+  md += rallyLengthInsightMarkdown(bestLengthBucket);
 
   // Clutch
   md += H2("Clutch performance (16+)");
@@ -647,7 +797,18 @@ export const performanceReportMarkdown = (matches, { playerName = "Player", scop
 
   // Deception
   md += H2("Predictability & deception");
-  md += P(`Holds: ${deception.holds} · Slices: ${deception.slices} · Per-match: ${deception.perMatch}`);
+  md += P(
+    `Half-smashes: ${deception.halfSmashes} · Slices: ${deception.slices} · ` +
+    `Variation per match: ${deception.perMatch}`,
+  );
+  if (deception.hasAdvancedTagging) {
+    md += P(
+      `Tracked deception — holds: ${deception.holds}, delays: ${deception.delays}, ` +
+      `double motion: ${deception.doubleMotion}, disguised: ${deception.disguised}.`,
+    );
+  } else {
+    md += P("_Hold/delay deception is not tracked unless advanced deception tagging is used._");
+  }
 
   // Tactical cleverness (full)
   md += H2("🧠 Tactical cleverness");
