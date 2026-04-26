@@ -2,6 +2,7 @@
 // No React, no store — everything here consumes the plain `matches` array.
 
 import { DISRUPTION_SHOTS, SHOT_NAMES } from "../constants/badminton.js";
+import { deriveShotContext } from "./rally.js";
 import {
   BENCHMARKS,
   PATTERN_MIN_COUNT,
@@ -553,28 +554,27 @@ export const serveReturnStats = (rallies) => {
   };
 };
 
-// ---------- Serve + third-shot table (Phase 7) ----------
-// Extended view: per (serveType, target) cell, with optional return-quality
-// columns. Uses the Phase-7 *optional* shot fields:
-//   shot[0].serveTarget          ("body" | "T" | "wide" | string zone) — defaults to "unknown"
-//   shot[0].serveHeightQuality   ("good" | "high" | string)
-//   shot[0].serveDepthQuality    ("good" | "short" | string)
-//   shot[1].returnType           ("net" | "lift" | "drive" | string)
-//   shot[1].returnQuality        ("weak" | "neutral" | "pressuring")
-//   shot[1].returnTargetZone     (1-9)
+// ---------- Serve + third-shot table (Phase 7, refactored) ----------
+// Per (serveType, target) bucket, with return-quality columns derived
+// from the existing shot data — no new capture fields required.
 //
-// All fields are optional. When not set, rows show an "unknown" target
-// and the return-quality columns show "—".
+// Derivations (see deriveShotContext in rally.js):
+//   returnType         = shots[1].shotType
+//   returnTargetZone   = shots[1].zone
+//   returnQualityForSon = sonPerspectiveQuality of shots[1].quality
+//                        (Opp E → "pressuring", Opp I → "weak", Opp N → "neutral")
+//
+// `serveTarget` remains an optional explicit field on the serve (body /
+// T / wide etc.). When not captured, the row shows target "unknown".
 //
 // Output rows:
-//   [{ serveType, target, count, winPct, weakReturnPct, pressuringReturnPct,
-//      thirdShotWinPct, weakReturns, pressuringReturns, returns }]
-//
-// Confidence is the caller's responsibility (use computeSampleConfidence).
+//   [{ serveType, target, count, won, winPct, returns,
+//      weakReturns, pressuringReturns, neutralReturns,
+//      weakReturnPct, pressuringReturnPct,
+//      thirdShotPts, thirdShotWon, thirdShotWinPct }]
 export const SERVE_TYPES = ["LS", "FS", "DS"];
 
 export const serveThirdShotTable = (rallies) => {
-  // serveType -> target -> aggregator
   const buckets = new Map();
   const key = (st, tgt) => `${st}::${tgt || "unknown"}`;
 
@@ -593,6 +593,7 @@ export const serveThirdShotTable = (rallies) => {
         returns: 0,
         weakReturns: 0,
         pressuringReturns: 0,
+        neutralReturns: 0,
         thirdShotPts: 0,
         thirdShotWon: 0,
       });
@@ -604,12 +605,18 @@ export const serveThirdShotTable = (rallies) => {
       row.thirdShotPts++;
       if (r.pointWonBy === "S") row.thirdShotWon++;
     }
-    const ret = r.shots[1];
-    if (ret) {
-      row.returns++;
-      const q = ret.returnQuality;
-      if (q === "weak") row.weakReturns++;
-      else if (q === "pressuring") row.pressuringReturns++;
+
+    // Opponent's return is shots[1] (rally is Son-served, so even index =
+    // Son, odd = Opp). Derive Son's view of that quality.
+    if (r.shots.length > 1) {
+      const ctx = deriveShotContext(r, 1);
+      if (ctx?.hitBy === "O") {
+        row.returns++;
+        const q = ctx.qualityForSonPerspective;
+        if (q === "weak") row.weakReturns++;
+        else if (q === "pressuring") row.pressuringReturns++;
+        else if (q === "neutral") row.neutralReturns++;
+      }
     }
   }
 
@@ -850,48 +857,77 @@ const BACKHAND_REAR_TARGETS = new Set([7]);
 
 const isPoorContact = (q) => q === "late" || q === "stretched" || q === "offbalance";
 
-// Aggregate Son's *errors* by target zone, then look at how many of those
-// errors carry origin/contact evidence supporting a backhand-rear claim.
+// Aggregate Son's *errors* by target zone, then check origin / body-side /
+// contact evidence (most of which is now derivable from the previous shot
+// thanks to deriveShotContext) to decide whether a backhand-rear weakness
+// claim is supported.
+//
+// Only Son shots are considered (Son's technical issue, by definition).
 //
 // Output:
 //   {
-//     totalErrors,
-//     rearTargetErrors,         // errors landing in 7/8/9
-//     backhandTargetErrors,     // errors landing in 7
-//     errorsWithOriginData,     // errors that have an originZone
-//     errorsWithContactData,    // errors with a contactQuality tag
-//     supportedBackhandClaim,   // true only if evidence supports the claim
-//     finding:                  // human string, used by report + markdown
+//     totalErrors,                  // # of Son UE losses with a final shot
+//     rearTargetErrors,             // errors landing in 7/8/9
+//     backhandTargetErrors,         // errors landing in 7 (BH rear corner)
+//     inferredOriginErrors,         // errors with a derivable origin zone
+//     errorsWithCapturedOrigin,     // errors with explicit shot.originZone
+//     errorsWithContactData,        // errors with a contactQuality tag
+//     supportedBackhandClaim,       // true only if evidence supports it
+//     originSourceMix:              // breakdown for transparency
+//       { captured, derived, serve, unknown },
+//     finding:                      // human string, used by report + markdown
 //   }
 export const analyzeZoneWeakness = (rallies) => {
-  const errors = [];
+  // Collect Son's error shots along with their derived context.
+  const sonErrors = [];
   for (const r of rallies) {
     if (r.result !== "UE" || r.pointWonBy !== "O") continue;
-    const last = r.shots[r.shots.length - 1];
+    const idx = r.shots.length - 1;
+    const last = r.shots[idx];
     if (!last) continue;
-    errors.push(last);
+    const ctx = deriveShotContext(r, idx);
+    // Be permissive: if we can't determine the hitter (e.g. no server set
+    // on legacy data), assume it's Son since a UE loss is by Son's hand.
+    if (ctx?.hitBy === "O") continue;
+    sonErrors.push({ shot: last, ctx });
   }
 
-  const totalErrors = errors.length;
+  const totalErrors = sonErrors.length;
   let rearTargetErrors = 0;
   let backhandTargetErrors = 0;
   let bhRearWithOriginEvidence = 0;
   let bhRearWithContactEvidence = 0;
   let bhRearWithBodySideEvidence = 0;
-  let errorsWithOriginData = 0;
+  let inferredOriginErrors = 0;
+  let errorsWithCapturedOrigin = 0;
   let errorsWithContactData = 0;
+  const originSourceMix = { captured: 0, derived: 0, serve: 0, unknown: 0 };
 
-  for (const s of errors) {
-    const target = s.targetZone || s.zone;
+  for (const { shot: s, ctx } of sonErrors) {
+    const target = ctx?.targetZone ?? s.zone;
+    const origin = ctx?.inferredOriginZone;
+    const source = ctx?.originZoneSource || "unknown";
+
+    if (source === "captured") {
+      originSourceMix.captured++;
+      errorsWithCapturedOrigin++;
+      inferredOriginErrors++;
+    } else if (source === "derived_from_previous_opponent_shot") {
+      originSourceMix.derived++;
+      inferredOriginErrors++;
+    } else if (source === "serve") {
+      originSourceMix.serve++;
+    } else {
+      originSourceMix.unknown++;
+    }
+
     if (REAR_TARGET_ZONES.has(target)) rearTargetErrors++;
     if (BACKHAND_REAR_TARGETS.has(target)) {
       backhandTargetErrors++;
-      // Origin signal: shot was hit from the backhand corner of own court (zone 7).
-      if (s.originZone === 7) bhRearWithOriginEvidence++;
+      if (origin === 7) bhRearWithOriginEvidence++;
       if (isPoorContact(s.contactQuality)) bhRearWithContactEvidence++;
-      if (s.bodySide === "backhand") bhRearWithBodySideEvidence++;
+      if (ctx?.bodySide === "backhand") bhRearWithBodySideEvidence++;
     }
-    if (s.originZone) errorsWithOriginData++;
     if (s.contactQuality) errorsWithContactData++;
   }
 
@@ -909,22 +945,31 @@ export const analyzeZoneWeakness = (rallies) => {
   } else if (backhandTargetErrors === 0) {
     finding = "Errors are spread across the court; no backhand-rear concentration.";
   } else if (supportedBackhandClaim) {
+    const originNote =
+      originSourceMix.captured > 0 && originSourceMix.derived === 0
+        ? "captured origin"
+        : originSourceMix.derived > 0 && originSourceMix.captured === 0
+        ? "origin inferred from previous opponent shot"
+        : "origin from a mix of captured and inferred data";
     finding =
       `Backhand rear court appears genuinely weak — ${backhandTargetErrors} errors at Z7 ` +
-      `with origin/contact evidence on ${supportingEvidenceCount} of them.`;
+      `with origin / contact / body-side evidence (${originNote}).`;
   } else {
     finding =
-      "Target-zone errors suggest a possible weakness, but origin/contact data " +
-      "is needed to confirm the technical cause.";
+      "Target-zone errors suggest a possible weakness. Inferred origin is " +
+      "available from prior-shot context but body-side or contact-quality " +
+      "data is still needed to confirm the technical cause.";
   }
 
   return {
     totalErrors,
     rearTargetErrors,
     backhandTargetErrors,
-    errorsWithOriginData,
+    inferredOriginErrors,
+    errorsWithCapturedOrigin,
     errorsWithContactData,
     supportedBackhandClaim,
+    originSourceMix,
     finding,
   };
 };

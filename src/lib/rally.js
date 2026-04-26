@@ -120,3 +120,108 @@ export const cycleDirection = (d) => {
   const i = order.indexOf(d);
   return order[(i + 1) % order.length] || "ST";
 };
+
+// ---------- Rally context derivations ----------
+//
+// Two perspective conventions matter here:
+//   1. `zone` is always recorded from Son's court perspective, regardless
+//      of who hit the shot. So the receiver's standing position equals
+//      the previous (incoming) shot's landing zone.
+//   2. `quality` (E/N/I) is from the *hitter's* perspective. Son E means
+//      Son hit a strong shot; Opp E means the opponent's shot was strong
+//      against Son.
+//
+// These helpers let analytics derive origin / opponent context / Son's
+// quality view without requiring new capture inputs.
+
+// Identify the player who hit `shotIndex` of a rally. Shots strictly
+// alternate; first shot is the server.
+//   Returns "S" (Son) | "O" (Opponent) | null when not derivable.
+export const shotHitter = (rally, shotIndex) => {
+  if (!rally || !rally.server) return null;
+  if (shotIndex == null || shotIndex < 0) return null;
+  const isEven = shotIndex % 2 === 0;
+  const server = rally.server;
+  if (server !== "S" && server !== "O") return null;
+  return isEven ? server : (server === "S" ? "O" : "S");
+};
+
+export const isSonShot = (rally, shotIndex) =>
+  shotHitter(rally, shotIndex) === "S";
+
+export const isOpponentShot = (rally, shotIndex) =>
+  shotHitter(rally, shotIndex) === "O";
+
+// Map the hitter's E/N/I onto Son's perspective. For Son's own shots
+// the value is unchanged; for Opp shots, E/I flip to "pressuring"/"weak"
+// (and N becomes the lowercase "neutral" so consumers can distinguish
+// "Son neutral shot" from "neutral opponent return").
+const sonPerspectiveQuality = (hitBy, q) => {
+  if (!q) return null;
+  if (hitBy === "S") return q;
+  if (hitBy === "O") {
+    if (q === "Effective")   return "pressuring";
+    if (q === "Ineffective") return "weak";
+    if (q === "Neutral")     return "neutral";
+  }
+  return q;
+};
+
+// Derive the analytical context for a single shot in a rally. Lets
+// analytics ask "where was Son when he hit?" and "what was the opponent's
+// previous shot?" without needing those fields to be explicitly captured.
+//
+// Future-proofing: if a shot ever carries an explicit `originZone`, that
+// capture wins and `originZoneSource` becomes "captured".
+export const deriveShotContext = (rally, shotIndex) => {
+  const shot = rally?.shots?.[shotIndex];
+  if (!shot) return null;
+
+  const hitBy = shotHitter(rally, shotIndex);
+  const prev = shotIndex > 0 ? rally.shots[shotIndex - 1] : null;
+  const prevHitBy = shotIndex > 0 ? shotHitter(rally, shotIndex - 1) : null;
+
+  // Origin inference. shots[0] is a serve — origin is the service court,
+  // which we represent as null + a "serve" source so callers can branch.
+  let inferredOriginZone = null;
+  let originZoneSource = "unknown";
+  if (shot.originZone != null) {
+    inferredOriginZone = shot.originZone;
+    originZoneSource = "captured";
+  } else if (shotIndex === 0) {
+    inferredOriginZone = null;
+    originZoneSource = "serve";
+  } else if (prev?.zone != null) {
+    inferredOriginZone = prev.zone;
+    originZoneSource = "derived_from_previous_opponent_shot";
+  }
+
+  // Previous opponent shot is only populated when the prior shot was hit
+  // by the *other* player. In a strictly alternating rally that's always
+  // true if hitBy is well-defined and prev exists, but we guard explicitly.
+  let previousOpponentShotType = null;
+  let previousOpponentShotZone = null;
+  if (prev && prevHitBy && prevHitBy !== hitBy) {
+    previousOpponentShotType = prev.shotType ?? null;
+    previousOpponentShotZone = prev.zone ?? null;
+  }
+
+  const bodySide =
+    shot.grip === "F" ? "forehand" :
+    shot.grip === "B" ? "backhand" :
+    null;
+
+  const q = shot.quality ?? null;
+
+  return {
+    hitBy,
+    targetZone: shot.zone ?? null,
+    inferredOriginZone,
+    originZoneSource,
+    previousOpponentShotType,
+    previousOpponentShotZone,
+    bodySide,
+    qualityFromHitterPerspective: q,
+    qualityForSonPerspective: sonPerspectiveQuality(hitBy, q),
+  };
+};

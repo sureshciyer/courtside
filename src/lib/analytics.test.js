@@ -818,15 +818,27 @@ describe("analyzeScorePressure", () => {
 });
 
 describe("serveThirdShotTable", () => {
-  // Helper: rally where Son served a given serve type to `target`, with
-  // optional return quality, and a final outcome.
+  // Map the spec's "weak / neutral / pressuring" return-quality wording
+  // back to the underlying opp-shot quality (E/N/I) we actually capture.
+  // Opp E = pressuring against Son; Opp I = weak; Opp N = neutral.
+  const RETURN_QUALITY_TO_OPP_E_N_I = {
+    weak: "Ineffective",
+    neutral: "Neutral",
+    pressuring: "Effective",
+  };
+  // Helper: rally where Son served a given serve type to `target`. The
+  // opponent return's quality is set as a hitter-perspective E/N/I tag,
+  // which the analytics derives back to "weak/neutral/pressuring".
   const served = (serveType, { target, returnQuality, won = true, len = 3 } = {}) =>
     rally({
       server: "S",
       pointWonBy: won ? "S" : "O",
       shots: [
         shot({ shotType: serveType, serveTarget: target }),
-        shot({ shotType: "DR", returnQuality }),
+        shot({
+          shotType: "DR",
+          quality: RETURN_QUALITY_TO_OPP_E_N_I[returnQuality],
+        }),
         ...Array(Math.max(0, len - 2)).fill(shot()),
       ],
     });
@@ -887,6 +899,44 @@ describe("serveThirdShotTable", () => {
     ];
     expect(serveThirdShotTable(rallies)).toEqual([]);
   });
+
+  // User spec item 6 — return type / target zone derive from existing fields.
+  it("derives returnType + returnTargetZone from the opponent return shot", () => {
+    const r = rally({
+      server: "S",
+      pointWonBy: "S",
+      shots: [
+        shot({ shotType: "LS", serveTarget: "T" }),
+        shot({ shotType: "LF", zone: 8, quality: "Ineffective" }),
+        shot({ shotType: "SM" }),
+      ],
+    });
+    const rows = serveThirdShotTable([r]);
+    expect(rows[0].returns).toBe(1);
+    expect(rows[0].weakReturns).toBe(1); // Opp's Ineffective return = weak for Son
+  });
+
+  it("Opp E return is counted as pressuring; Opp I as weak", () => {
+    const ePressure = rally({
+      server: "S",
+      pointWonBy: "O",
+      shots: [
+        shot({ shotType: "LS", serveTarget: "T" }),
+        shot({ shotType: "DR", quality: "Effective" }),
+      ],
+    });
+    const eWeak = rally({
+      server: "S",
+      pointWonBy: "S",
+      shots: [
+        shot({ shotType: "LS", serveTarget: "T" }),
+        shot({ shotType: "LF", quality: "Ineffective" }),
+      ],
+    });
+    const rows = serveThirdShotTable([ePressure, eWeak]);
+    expect(rows[0].pressuringReturns).toBe(1);
+    expect(rows[0].weakReturns).toBe(1);
+  });
 });
 
 describe("analyzeZoneWeakness", () => {
@@ -911,7 +961,7 @@ describe("analyzeZoneWeakness", () => {
     const out = analyzeZoneWeakness(rallies);
     expect(out.backhandTargetErrors).toBe(5);
     expect(out.supportedBackhandClaim).toBe(false);
-    expect(out.finding).toMatch(/origin\/contact data is needed/i);
+    expect(out.finding).toMatch(/needed to confirm the technical cause/i);
   });
 
   it("claims backhand weakness when origin / contact / bodySide back it up", () => {
@@ -930,6 +980,29 @@ describe("analyzeZoneWeakness", () => {
     const out = analyzeZoneWeakness(rallies);
     expect(out.backhandTargetErrors).toBe(0);
     expect(out.finding).toMatch(/no backhand-rear concentration/i);
+  });
+
+  // Origin inferred from the prior opp shot (no captured originZone).
+  it("derives Son's origin from the prior opponent shot when origin is not captured", () => {
+    // Opp serves a Low Serve to Son's Z7 (back-left). Son returns and
+    // makes an unforced error at Z7 with a backhand grip.
+    const buildBhRearError = () => rally({
+      server: "O",
+      pointWonBy: "O",
+      result: "UE",
+      shots: [
+        shot({ shotType: "LS", zone: 7 }),
+        shot({ shotType: "CL", zone: 7, grip: "B" }),
+      ],
+    });
+    const out = analyzeZoneWeakness([buildBhRearError(), buildBhRearError()]);
+
+    expect(out.backhandTargetErrors).toBe(2);
+    expect(out.originSourceMix.derived).toBe(2);
+    expect(out.originSourceMix.captured).toBe(0);
+    // Origin Z7 + bodySide backhand both fire; claim should be supported.
+    expect(out.supportedBackhandClaim).toBe(true);
+    expect(out.finding).toMatch(/inferred from previous opponent shot/i);
   });
 });
 
