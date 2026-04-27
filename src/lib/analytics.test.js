@@ -39,6 +39,7 @@ import {
   analyzeUnforcedErrors,
   analyzeResponsePredictability,
   analyzePressurePredictability,
+  analyzeShotMix,
 } from "./analytics.js";
 import { rally, shot, match, wonRally, lostRally } from "./__fixtures__.js";
 
@@ -1760,5 +1761,170 @@ describe("listOpponents / opponentDossier / listTournaments", () => {
   it("listTournaments returns unique tournament names", () => {
     const t = listTournaments(matches);
     expect(t.map((x) => x.name).sort()).toEqual(["Cup A", "Cup B"]);
+  });
+});
+
+describe("analyzeShotMix", () => {
+  const matchOf = (rallies, overrides = {}) =>
+    match({ id: "M001", tournament: "Shot Cup", opponent: "Mix Opp", rallies, ...overrides });
+
+  const oppServeRally = (shots, overrides = {}) => rally({
+    matchId: "M001",
+    server: "O",
+    set: 1,
+    score: "5-5",
+    pointWonBy: "S",
+    result: "W",
+    shots: shots.map((s) => shot(s)),
+    ...overrides,
+  });
+
+  it("separates Son shot mix from Opponent shot mix while allShotMix counts all shots", () => {
+    const m = matchOf([
+      oppServeRally([
+        { shotType: "LS" },
+        { shotType: "DR" },
+        { shotType: "CL" },
+        { shotType: "SM" },
+      ]),
+    ]);
+    const out = analyzeShotMix([m]);
+    expect(out.totalShots).toBe(4);
+    expect(out.sonShots).toBe(2);
+    expect(out.opponentShots).toBe(2);
+    expect(out.sonShotMix.map((r) => r.shotType).sort()).toEqual(["DR", "SM"]);
+    expect(out.opponentShotMix.map((r) => r.shotType).sort()).toEqual(["CL", "LS"]);
+    expect(out.allShotMix.reduce((a, r) => a + r.count, 0)).toBe(4);
+  });
+
+  it("computes share percentages and E/N/I percentages by shot type", () => {
+    const rallies = [
+      oppServeRally([{ shotType: "LS" }, { shotType: "DR", quality: "Effective" }]),
+      oppServeRally([{ shotType: "LS" }, { shotType: "DR", quality: "Neutral" }]),
+      oppServeRally([{ shotType: "LS" }, { shotType: "DR", quality: "Ineffective" }]),
+      oppServeRally([{ shotType: "LS" }, { shotType: "SM", quality: "Effective" }]),
+    ];
+    const out = analyzeShotMix([matchOf(rallies)]);
+    const dropMix = out.sonShotMix.find((r) => r.shotType === "DR");
+    const dropEff = out.sonShotEffectiveness.find((r) => r.shotType === "DR");
+    expect(dropMix.pctOfSonShots).toBe(75);
+    expect(dropEff.shareOfSonShots).toBe(75);
+    expect(dropEff.effectivePct).toBe(33);
+    expect(dropEff.neutralPct).toBe(33);
+    expect(dropEff.ineffectivePct).toBe(33);
+  });
+
+  it("flags absent HS as underused variation and absent shot context", () => {
+    const out = analyzeShotMix([matchOf([
+      oppServeRally([{ shotType: "LS" }, { shotType: "DR" }]),
+    ])]);
+    expect(out.absentShots.some((r) => r.shotType === "HS")).toBe(true);
+    expect(out.underusedVariationShots.some((r) => r.shotType === "HS")).toBe(true);
+  });
+
+  it("detects dominant shots and overused low-yield shots", () => {
+    const rallies = Array.from({ length: 5 }, (_, i) =>
+      oppServeRally(
+        [{ shotType: "LS" }, { shotType: "DR", quality: "Ineffective" }],
+        { pointWonBy: "O", result: "UE", score: `${i}-0` },
+      ),
+    );
+    const out = analyzeShotMix([matchOf(rallies)]);
+    expect(out.dominantShots[0].shotType).toBe("DR");
+    expect(out.overusedLowYieldShots[0].shotType).toBe("DR");
+    expect(out.overusedLowYieldShots[0].ineffectivePct).toBe(100);
+  });
+
+  it("counts pointWinRateAfterShot once per rally per shot type", () => {
+    const rallies = [
+      oppServeRally([
+        { shotType: "LS" },
+        { shotType: "DR" },
+        { shotType: "CL" },
+        { shotType: "DR" },
+      ], { pointWonBy: "S", result: "W" }),
+      oppServeRally([
+        { shotType: "LS" },
+        { shotType: "DR" },
+      ], { pointWonBy: "O", result: "UE" }),
+    ];
+    const out = analyzeShotMix([matchOf(rallies)]);
+    const drop = out.sonShotEffectiveness.find((r) => r.shotType === "DR");
+    expect(drop.count).toBe(3);
+    expect(drop.pointWinRallyCount).toBe(2);
+    expect(drop.pointWinRateAfterShotPct).toBe(50);
+  });
+
+  it("uses pre-rally score for clutch phase shot mix", () => {
+    const rallies = [
+      oppServeRally([{ shotType: "LS" }, { shotType: "SM" }], { score: "16-15" }),
+      oppServeRally([{ shotType: "LS" }, { shotType: "DR" }], { score: "15-15" }),
+    ];
+    const out = analyzeShotMix([matchOf(rallies)]);
+    const clutch = out.phaseShotMix.find((r) => r.phase === "clutch");
+    expect(clutch.totalSonShots).toBe(1);
+    expect(clutch.smashShare).toBe(100);
+  });
+
+  it("after_lost_point resets at set and match boundaries", () => {
+    const lossSet1 = oppServeRally(
+      [{ shotType: "LS" }, { shotType: "DR" }],
+      { set: 1, pointWonBy: "O", result: "UE" },
+    );
+    const firstSet2 = oppServeRally(
+      [{ shotType: "LS" }, { shotType: "SM" }],
+      { set: 2, pointWonBy: "S", result: "W" },
+    );
+    const lossM1 = oppServeRally(
+      [{ shotType: "LS" }, { shotType: "DR" }],
+      { matchId: "M001", pointWonBy: "O", result: "UE" },
+    );
+    const firstM2 = {
+      ...oppServeRally([{ shotType: "LS" }, { shotType: "SM" }], { matchId: "M002" }),
+      matchId: "M002",
+    };
+    const out = analyzeShotMix([
+      matchOf([lossSet1, firstSet2]),
+      matchOf([lossM1], { id: "M001" }),
+      matchOf([firstM2], { id: "M002" }),
+    ]);
+    const afterLost = out.phaseShotMix.find((r) => r.phase === "after_lost_point");
+    expect(afterLost.totalSonShots).toBe(0);
+  });
+
+  it("zone shot mix uses inferredOriginZone from the previous opponent shot", () => {
+    const out = analyzeShotMix([matchOf([
+      oppServeRally([
+        { shotType: "CL", zone: 7 },
+        { shotType: "DR", zone: 3, grip: "F", dir: "CR" },
+      ]),
+    ])]);
+    const z7 = out.zoneShotMix.find((z) => Number(z.originZone) === 7);
+    expect(z7.totalSonShots).toBe(1);
+    expect(z7.topShotType.shotType).toBe("DR");
+    expect(z7.topResponse.label).toBe("F-DR-CR to Z3");
+  });
+
+  it("marks denominator < 5 as lowSample", () => {
+    const out = analyzeShotMix([matchOf([
+      oppServeRally([{ shotType: "LS" }, { shotType: "DR" }]),
+      oppServeRally([{ shotType: "LS" }, { shotType: "DR" }]),
+    ])]);
+    expect(out.sonShotEffectiveness.find((r) => r.shotType === "DR").lowSample).toBe(true);
+    expect(out.phaseShotMix.find((r) => r.phase === "all_points").lowSample).toBe(true);
+  });
+
+  it("generates and deduplicates evidence by match/set/rally/score", () => {
+    const sameRally = oppServeRally([
+      { shotType: "LS" },
+      { shotType: "DR" },
+      { shotType: "CL" },
+      { shotType: "DR" },
+    ], { score: "9-9" });
+    const out = analyzeShotMix([matchOf([sameRally])]);
+    const drop = out.sonShotEffectiveness.find((r) => r.shotType === "DR");
+    expect(drop.evidence).toHaveLength(1);
+    expect(drop.evidence[0].matchId).toBe("M001");
+    expect(drop.evidence[0].score).toBe("9-9");
   });
 });

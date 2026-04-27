@@ -95,7 +95,7 @@ export default function Report({ setScreen }) {
           clutch, fatigue, deception, effectiveness,
           winnerZones, errorZonesAll, allZones, recs, advanced, confidence,
           leaks, serveThirdShot, zoneWeakness, trainingPlan,
-          unforcedErrors, predictability, pressurePredictability } = bundle;
+          unforcedErrors, shotMix, predictability, pressurePredictability } = bundle;
   const wonMatches = matches.filter((m) => {
     const setsWon = m.sets.filter((s) => s.sonScore > s.oppScore).length;
     return setsWon > m.sets.length / 2;
@@ -207,6 +207,7 @@ export default function Report({ setScreen }) {
             ["a1", "1. Tournament overview"],
             ["a2", "2. Court heatmaps"],
             ["a3", "3. Shot distribution"],
+            ["a3-shot-mix", "Shot Mix & Effectiveness"],
             ["a4", "4. Rally length profile"],
             ["a5", "5. Serve & return game"],
             ["a6", "6. Clutch performance"],
@@ -309,6 +310,10 @@ export default function Report({ setScreen }) {
           })}
         </div>
       )}
+
+      {/* Shot Mix & Effectiveness */}
+      <SH id="a3-shot-mix" t="Shot Mix & Effectiveness" />
+      <ShotMixEffectivenessSection data={shotMix} />
 
       {/* 4. Rally length profile */}
       <SH id="a4" n="4" t="Rally length profile" />
@@ -1636,6 +1641,146 @@ function MomentumChunksView({ data }) {
 function Grid({ c, children }) {
   const cols = { 2: "grid-cols-2", 3: "grid-cols-2 sm:grid-cols-3", 4: "grid-cols-2 sm:grid-cols-4", 5: "grid-cols-2 sm:grid-cols-5" };
   return <div className={`grid ${cols[c] || cols[3]} gap-2`}>{children}</div>;
+}
+
+function ShotMixEffectivenessSection({ data }) {
+  if (!data || data.totalShots === 0) {
+    return <Empty>No shot-level data captured yet.</Empty>;
+  }
+  const sonMixRows = data.sonShotMix.filter((r) => r.count >= 3).slice(0, 10);
+  const hiddenSonRows = data.sonShotMix.filter((r) => r.count > 0 && r.count <= 2).length;
+  const effRows = data.sonShotEffectiveness.filter((r) => r.count >= 3).slice(0, 10);
+  const phaseRows = data.phaseShotMix.filter((r) => r.totalSonShots > 0);
+  const zoneRows = data.zoneShotMix.filter((r) => r.totalSonShots >= 3).slice(0, 8);
+  const noteForMix = (row) => {
+    const lowYield = data.overusedLowYieldShots.find((s) => s.shotType === row.shotType);
+    if (lowYield) return "Dominant but low-yield; review timing and target.";
+    if (row.count < 5) return "Directional only / low sample.";
+    if (data.dominantShots.some((s) => s.shotType === row.shotType)) return "Dominant Son choice.";
+    return "";
+  };
+  const coachNote = (row) => {
+    if (row.lowSample) return "Low sample; avoid strong claims.";
+    if (row.finalShotUERatePct >= 20) return "Final-shot UE rate is high; check balance and risk.";
+    if (row.ineffectivePct >= 25) return "Often tagged ineffective; review usage context.";
+    if (row.pointWinRateAfterShotPct != null && row.pointWinRateAfterShotPct <= 40) return "Rallies containing this shot are not converting well.";
+    if (row.winnerOrFEContributionPct >= 20) return "Contributing to finishes.";
+    return "Stable in this sample.";
+  };
+  const evidence = (row) =>
+    row?.evidence?.length ? row.evidence.map((e) => e.label).join("; ") : "—";
+  const topNames = (rows) =>
+    rows?.length ? rows.map((r) => `${r.label} ${r.share}%`).join(", ") : "—";
+
+  return (
+    <div className="space-y-4">
+      <p className="text-xs text-neutral-400 leading-relaxed">
+        Son-only mix is the coaching baseline. All-shot mix is match-environment context:
+        {" "}{data.totalShots} total shots, {data.sonShots} Son shots, {data.opponentShots} opponent shots.
+      </p>
+
+      <div>
+        <MiniLabel>A. Son Shot Mix</MiniLabel>
+        {sonMixRows.length ? (
+          <div className="overflow-x-auto">
+            <table className="w-full text-[11px] border-collapse">
+              <thead><tr className="bg-neutral-800 text-neutral-300 print:bg-neutral-200 print:text-black"><Th>Shot</Th><Th>Count</Th><Th>Share</Th><Th>Rank</Th><Th>Note</Th></tr></thead>
+              <tbody>
+                {sonMixRows.map((row) => (
+                  <tr key={row.shotType} className="bg-neutral-900 print:bg-white">
+                    <Td>{row.label}</Td>
+                    <Td>{row.count}</Td>
+                    <Td>{row.pctOfSonShots}%</Td>
+                    <Td>{row.rank}</Td>
+                    <Td>{noteForMix(row)}</Td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : <Empty>No Son shot type reaches the directional threshold yet.</Empty>}
+        {hiddenSonRows > 0 && (
+          <div className="text-[11px] text-neutral-500 mt-1">
+            {hiddenSonRows} shot type{hiddenSonRows !== 1 ? "s" : ""} with 1-2 uses hidden below threshold.
+          </div>
+        )}
+      </div>
+
+      <div>
+        <MiniLabel>B. Son Shot Effectiveness</MiniLabel>
+        {effRows.length ? (
+          <div className="overflow-x-auto">
+            <table className="w-full text-[11px] border-collapse">
+              <thead><tr className="bg-neutral-800 text-neutral-300 print:bg-neutral-200 print:text-black"><Th>Shot</Th><Th>Count</Th><Th>E%</Th><Th>N%</Th><Th>I%</Th><Th>Final UE%</Th><Th>Winner/FE%</Th><Th>Coaching note</Th></tr></thead>
+              <tbody>
+                {effRows.map((row) => (
+                  <tr key={row.shotType} className="bg-neutral-900 print:bg-white">
+                    <Td>{row.label}</Td>
+                    <Td>{row.count}</Td>
+                    <Td>{row.effectivePct}%</Td>
+                    <Td>{row.neutralPct}%</Td>
+                    <Td>{row.ineffectivePct}%</Td>
+                    <Td>{row.finalShotUERatePct}%</Td>
+                    <Td>{row.winnerOrFEContributionPct}%</Td>
+                    <Td>{coachNote(row)}</Td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : <Empty>Need at least 3 uses of a Son shot type for directional effectiveness rows.</Empty>}
+      </div>
+
+      <div>
+        <MiniLabel>C. Shot Mix by Phase</MiniLabel>
+        <div className="overflow-x-auto">
+          <table className="w-full text-[11px] border-collapse">
+            <thead><tr className="bg-neutral-800 text-neutral-300 print:bg-neutral-200 print:text-black"><Th>Phase</Th><Th>Top shot types</Th><Th>Drop %</Th><Th>Clear %</Th><Th>Lift %</Th><Th>Smash %</Th><Th>Slice %</Th><Th>Note</Th></tr></thead>
+            <tbody>
+              {phaseRows.map((row) => (
+                <tr key={row.phase} className="bg-neutral-900 print:bg-white">
+                  <Td>{row.label}</Td>
+                  <Td>{topNames(row.topShotTypes)}</Td>
+                  <Td>{row.dropShare}%</Td>
+                  <Td>{row.clearShare}%</Td>
+                  <Td>{row.liftShare}%</Td>
+                  <Td>{row.smashShare}%</Td>
+                  <Td>{row.sliceShare}%</Td>
+                  <Td>{row.note || "—"}</Td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      <div>
+        <MiniLabel>D. Zone-Specific Shot Mix</MiniLabel>
+        {zoneRows.length ? (
+          <div className="overflow-x-auto">
+            <table className="w-full text-[11px] border-collapse">
+              <thead><tr className="bg-neutral-800 text-neutral-300 print:bg-neutral-200 print:text-black"><Th>Origin zone</Th><Th>Top shot type</Th><Th>Top response</Th><Th>UE rate</Th><Th>Evidence</Th></tr></thead>
+              <tbody>
+                {zoneRows.map((row) => (
+                  <tr key={row.originZone} className="bg-neutral-900 print:bg-white align-top">
+                    <Td>{row.label}{row.lowSample ? " (directional)" : ""}</Td>
+                    <Td>{row.topShotType ? `${row.topShotType.label} (${row.topShotType.share}%)` : "—"}</Td>
+                    <Td>{row.topResponse?.label || "—"}</Td>
+                    <Td>{row.ueRatePct}%</Td>
+                    <Td>{evidence(row)}</Td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        ) : <Empty>No inferred origin zone reaches the directional threshold yet.</Empty>}
+      </div>
+
+      <Insight>
+        <b>Coach insight:</b> {data.insight} {data.coachingNotes?.[1]}
+      </Insight>
+    </div>
+  );
 }
 
 function Stat({ l, v, s, tone = "default" }) {

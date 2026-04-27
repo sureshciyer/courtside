@@ -817,6 +817,7 @@ export const reportBundle = (matches) => {
   const style = classifyStyle(agg.shots);
   const predictability = analyzeResponsePredictability(matches);
   const unforcedErrors = analyzeUnforcedErrors(matches);
+  const shotMix = analyzeShotMix(matches);
   return {
     matches,
     rallies,
@@ -842,6 +843,7 @@ export const reportBundle = (matches) => {
     zoneWeakness: analyzeZoneWeakness(rallies),
     trainingPlan: generateTrainingPlan(matches),
     unforcedErrors,
+    shotMix,
     predictability,
     pressurePredictability: analyzePressurePredictability(matches, { allPatterns: predictability }),
   };
@@ -1041,6 +1043,525 @@ const dedupeEvidence = (events, maxEvidence = UE_MAX_EVIDENCE) => {
     if (evidence.length >= maxEvidence) break;
   }
   return evidence;
+};
+
+const normalizeShotQuality = (quality) => {
+  if (quality === "E" || quality === "Effective") return "Effective";
+  if (quality === "I" || quality === "Ineffective") return "Ineffective";
+  return "Neutral";
+};
+
+const shotLabel = (shotType) => SHOT_NAMES[shotType] || shotType || "Unknown";
+
+const phaseSampleLevel = (count) => {
+  if (count >= 5) return "main";
+  if (count >= 3) return "directional_only";
+  return "below_threshold";
+};
+
+const topShotRows = (counts, total, limit = 3) =>
+  [...counts.entries()]
+    .map(([shotType, count]) => ({
+      shotType,
+      label: shotLabel(shotType),
+      count,
+      share: pct(count, total),
+    }))
+    .sort((a, b) => b.count - a.count || a.label.localeCompare(b.label))
+    .slice(0, limit);
+
+const responseNotation = (shot) => {
+  if (!shot) return null;
+  const shotType = shot.shotType || shot.code || "?";
+  const grip = shot.grip || "?";
+  const dir = shot.dir || "?";
+  return `${grip}-${shotType}-${dir} to Z${shot.zone ?? "?"}`;
+};
+
+const SHOT_MIX_IMPORTANT_ABSENT = ["HS", "SM", "SL", "PS", "KL", "BL"];
+const SHOT_MIX_FOCUS_SHOTS = ["DR", "CL", "LF", "SM", "SL", "HS"];
+const SHOT_MIX_VARIATION_SHOTS = new Set(["SL", "HS", "PS"]);
+
+// ===================================================================
+//  SHOT MIX & EFFECTIVENESS
+//
+//  Coach-facing shot selection analysis. Distributions are deliberately
+//  separated into all-shot environment, Son-only, and Opponent-only views.
+//  Point win rate after shot counts each rally once per Son shot type, so
+//  repeated drops inside one rally do not overweight that rally.
+// ===================================================================
+export const analyzeShotMix = (matches, options = {}) => {
+  const maxEvidence = options.maxEvidence ?? 5;
+  const allCounts = new Map();
+  const sonCounts = new Map();
+  const opponentCounts = new Map();
+  const evidenceByType = new Map();
+  const sonStats = new Map();
+  const pointWinByType = new Map();
+  const phaseBuckets = new Map();
+  const zoneBuckets = new Map();
+  let totalShots = 0;
+  let sonShots = 0;
+  let opponentShots = 0;
+  let trackedDeception = 0;
+  let unknownDeception = 0;
+
+  const ensureStats = (shotType) => {
+    if (!sonStats.has(shotType)) {
+      sonStats.set(shotType, {
+        shotType,
+        label: shotLabel(shotType),
+        count: 0,
+        effectiveCount: 0,
+        neutralCount: 0,
+        ineffectiveCount: 0,
+        finalShotUECount: 0,
+        finalShotWinnerCount: 0,
+        finalShotFECount: 0,
+        evidenceEvents: [],
+      });
+    }
+    return sonStats.get(shotType);
+  };
+
+  const ensurePhase = (phase) => {
+    if (!phaseBuckets.has(phase)) {
+      phaseBuckets.set(phase, {
+        phase,
+        totalSonShots: 0,
+        counts: new Map(),
+        ueByType: new Map(),
+      });
+    }
+    return phaseBuckets.get(phase);
+  };
+
+  const ensureZone = (zone) => {
+    if (!zoneBuckets.has(zone)) {
+      zoneBuckets.set(zone, {
+        originZone: zone,
+        label: `Z${zone}`,
+        totalSonShots: 0,
+        counts: new Map(),
+        ueByType: new Map(),
+        responseCounts: new Map(),
+        evidenceEvents: [],
+      });
+    }
+    return zoneBuckets.get(zone);
+  };
+
+  const addEvidence = (map, shotType, event) => {
+    if (!map.has(shotType)) map.set(shotType, []);
+    map.get(shotType).push(event);
+  };
+
+  for (const m of matches || []) {
+    const rallies = m.rallies || [];
+    for (let rIdx = 0; rIdx < rallies.length; rIdx++) {
+      const r = rallies[rIdx];
+      const prev = rIdx > 0 && rallies[rIdx - 1]?.set === r.set ? rallies[rIdx - 1] : null;
+      const score = parsePreRallyScore(r.score);
+      const phaseFlags = {
+        all_points: true,
+        clutch: score.max >= 16,
+        late_phase: score.max >= 12,
+        after_lost_point: prev?.pointWonBy === "O",
+        leading: score.son > score.opp,
+        trailing: score.son < score.opp,
+      };
+      const eventBase = {
+        matchId: m.id || r.matchId,
+        set: r.set,
+        rallyIndex: rIdx + 1,
+        score: r.score,
+      };
+      const event = {
+        ...eventBase,
+        evidenceLabel: `${m.id || r.matchId || "M?"} S${r.set ?? "?"} R${rIdx + 1}${r.score ? ` @ ${r.score}` : ""}`,
+      };
+      const sonTypesInRally = new Set();
+      let lastSonShotType = null;
+      let finalSonShotType = null;
+      const finalIndex = (r.shots || []).length - 1;
+      const finalHitter = shotHitter(r, finalIndex);
+
+      for (let i = 0; i < (r.shots || []).length; i++) {
+        const s = r.shots[i];
+        const shotType = s.shotType || s.code;
+        if (!shotType) continue;
+        const hitBy = shotHitter(r, i);
+        totalShots++;
+        addMapCount(allCounts, shotType);
+        addEvidence(evidenceByType, shotType, event);
+
+        const deceptionType = normaliseDeceptionType(s.deceptionType);
+        if (TRACKED_DECEPTION_TYPES.has(deceptionType)) trackedDeception++;
+        else if (deceptionType === "unknown") unknownDeception++;
+
+        if (hitBy === "S") {
+          sonShots++;
+          sonTypesInRally.add(shotType);
+          lastSonShotType = shotType;
+          if (i === finalIndex) finalSonShotType = shotType;
+          addMapCount(sonCounts, shotType);
+          const stats = ensureStats(shotType);
+          stats.count++;
+          stats.evidenceEvents.push(event);
+          const q = normalizeShotQuality(s.quality);
+          if (q === "Effective") stats.effectiveCount++;
+          else if (q === "Ineffective") stats.ineffectiveCount++;
+          else stats.neutralCount++;
+
+          for (const [phase, include] of Object.entries(phaseFlags)) {
+            if (!include) continue;
+            const bucket = ensurePhase(phase);
+            bucket.totalSonShots++;
+            addMapCount(bucket.counts, shotType);
+            if (q === "Ineffective" || (i === finalIndex && r.result === "UE" && r.pointWonBy === "O")) {
+              addMapCount(bucket.ueByType, shotType);
+            }
+          }
+
+          const ctx = deriveShotContext(r, i);
+          if (ctx?.inferredOriginZone != null) {
+            const zone = ensureZone(ctx.inferredOriginZone);
+            zone.totalSonShots++;
+            addMapCount(zone.counts, shotType);
+            const notation = responseNotation(s);
+            if (notation) addMapCount(zone.responseCounts, notation);
+            if (q === "Ineffective" || (i === finalIndex && r.result === "UE" && r.pointWonBy === "O")) {
+              addMapCount(zone.ueByType, shotType);
+            }
+            zone.evidenceEvents.push({
+              ...event,
+              evidenceLabel: `${event.evidenceLabel}: ${notation || shotLabel(shotType)} from Z${ctx.inferredOriginZone}`,
+            });
+          }
+        } else if (hitBy === "O") {
+          opponentShots++;
+          addMapCount(opponentCounts, shotType);
+        }
+      }
+
+      if (r.result === "UE" && r.pointWonBy === "O" && finalSonShotType) {
+        ensureStats(finalSonShotType).finalShotUECount++;
+      }
+      if (r.result === "W" && r.pointWonBy === "S" && finalHitter === "S" && finalSonShotType) {
+        ensureStats(finalSonShotType).finalShotWinnerCount++;
+      }
+      if (r.result === "FE" && r.pointWonBy === "S" && lastSonShotType) {
+        ensureStats(lastSonShotType).finalShotFECount++;
+      }
+      for (const shotType of sonTypesInRally) {
+        if (!pointWinByType.has(shotType)) pointWinByType.set(shotType, { rallies: 0, won: 0 });
+        const row = pointWinByType.get(shotType);
+        row.rallies++;
+        if (r.pointWonBy === "S") row.won++;
+      }
+    }
+  }
+
+  const buildMix = (counts, denominatorField) =>
+    [...counts.entries()]
+      .map(([shotType, count]) => ({
+        shotType,
+        label: shotLabel(shotType),
+        count,
+        pctOfTotalShots: pct(count, totalShots),
+        pctOfSonShots: denominatorField === "son" ? pct(count, sonShots) : null,
+        pctOfOpponentShots: denominatorField === "opponent" ? pct(count, opponentShots) : null,
+        evidence: dedupeEvidence(evidenceByType.get(shotType) || [], maxEvidence),
+      }))
+      .sort((a, b) => b.count - a.count || a.label.localeCompare(b.label))
+      .map((row, idx) => ({ ...row, rank: idx + 1 }));
+
+  const allShotMix = buildMix(allCounts, "all");
+  const sonShotMix = buildMix(sonCounts, "son");
+  const opponentShotMix = buildMix(opponentCounts, "opponent");
+
+  const sonShotEffectiveness = [...sonStats.values()]
+    .map((row) => {
+      const wins = pointWinByType.get(row.shotType) || { rallies: 0, won: 0 };
+      const finalShotUERate = row.count ? row.finalShotUECount / row.count : 0;
+      const winnerOrFEContribution = row.count
+        ? (row.finalShotWinnerCount + row.finalShotFECount) / row.count
+        : 0;
+      const pointWinRateAfterShot = wins.rallies ? wins.won / wins.rallies : null;
+      return {
+        shotType: row.shotType,
+        label: row.label,
+        count: row.count,
+        shareOfSonShots: pct(row.count, sonShots),
+        effectiveCount: row.effectiveCount,
+        neutralCount: row.neutralCount,
+        ineffectiveCount: row.ineffectiveCount,
+        effectivePct: pct(row.effectiveCount, row.count),
+        neutralPct: pct(row.neutralCount, row.count),
+        ineffectivePct: pct(row.ineffectiveCount, row.count),
+        finalShotUECount: row.finalShotUECount,
+        finalShotWinnerCount: row.finalShotWinnerCount,
+        finalShotFECount: row.finalShotFECount,
+        finalShotUERate,
+        finalShotUERatePct: pct(row.finalShotUECount, row.count),
+        winnerOrFEContribution,
+        winnerOrFEContributionPct: pct(row.finalShotWinnerCount + row.finalShotFECount, row.count),
+        pointWinRateAfterShot,
+        pointWinRateAfterShotPct: pointWinRateAfterShot == null ? null : pct(wins.won, wins.rallies),
+        pointWinRallyCount: wins.rallies,
+        lowSample: row.count < 5,
+        sampleLevel: phaseSampleLevel(row.count),
+        evidence: dedupeEvidence(row.evidenceEvents, maxEvidence),
+      };
+    })
+    .sort((a, b) => b.count - a.count || a.label.localeCompare(b.label));
+
+  const effectivenessByType = new Map(sonShotEffectiveness.map((row) => [row.shotType, row]));
+  const dominantShots = sonShotEffectiveness.filter((row) => row.shareOfSonShots >= 15);
+  const absentShots = SHOT_MIX_IMPORTANT_ABSENT
+    .filter((shotType) => !sonCounts.get(shotType))
+    .map((shotType) => ({
+      shotType,
+      label: shotLabel(shotType),
+      count: 0,
+      shareOfSonShots: 0,
+      lowSample: true,
+      sampleLevel: "below_threshold",
+      note: "Low usage may mean the opportunity did not arise, or the player is not choosing this option.",
+    }));
+  const infrequentShots = [
+    ...sonShotEffectiveness.filter((row) => row.count > 0 && row.shareOfSonShots <= 5),
+    ...absentShots,
+  ];
+
+  const attackOpportunities = [...zoneBuckets.values()].some((z) =>
+    [7, 8, 9].includes(Number(z.originZone)) && z.totalSonShots >= 3,
+  );
+  const deceptionAbsent = trackedDeception === 0;
+  const underusedVariationShots = [];
+  if (!sonCounts.get("HS")) {
+    underusedVariationShots.push({
+      shotType: "HS",
+      label: shotLabel("HS"),
+      reason: "No half-smashes captured.",
+      count: 0,
+      shareOfSonShots: 0,
+      evidence: [],
+    });
+  }
+  const sliceShare = pct(sonCounts.get("SL") || 0, sonShots);
+  if (sliceShare < 5) {
+    underusedVariationShots.push({
+      shotType: "SL",
+      label: shotLabel("SL"),
+      reason: `Slice share is ${sliceShare}% of Son shots.`,
+      count: sonCounts.get("SL") || 0,
+      shareOfSonShots: sliceShare,
+      evidence: dedupeEvidence(evidenceByType.get("SL") || [], maxEvidence),
+    });
+  }
+  if (deceptionAbsent) {
+    underusedVariationShots.push({
+      shotType: "deception",
+      label: "Hold / delay / disguise",
+      reason: unknownDeception > 0 ? "No tracked deception tags captured." : "Deception tags are absent.",
+      count: trackedDeception,
+      shareOfSonShots: 0,
+      evidence: [],
+    });
+  }
+  const smashShare = pct(sonCounts.get("SM") || 0, sonShots);
+  if (attackOpportunities && smashShare < 5) {
+    underusedVariationShots.push({
+      shotType: "SM",
+      label: shotLabel("SM"),
+      reason: "Smash usage is low while rear-court response opportunities appear in the sample.",
+      count: sonCounts.get("SM") || 0,
+      shareOfSonShots: smashShare,
+      evidence: dedupeEvidence(evidenceByType.get("SM") || [], maxEvidence),
+    });
+  }
+
+  const overusedLowYieldShots = sonShotEffectiveness
+    .filter((row) =>
+      row.shareOfSonShots >= 15 &&
+      row.count >= 5 &&
+      (
+        row.finalShotUERate >= 0.2 ||
+        row.ineffectivePct >= 25 ||
+        (row.pointWinRateAfterShot != null && row.pointWinRateAfterShot <= 0.4)
+      ),
+    )
+    .map((row) => ({
+      shotType: row.shotType,
+      label: row.label,
+      shareOfSonShots: row.shareOfSonShots,
+      finalShotUERate: row.finalShotUERate,
+      finalShotUERatePct: row.finalShotUERatePct,
+      ineffectivePct: row.ineffectivePct,
+      pointWinRateAfterShot: row.pointWinRateAfterShot,
+      pointWinRateAfterShotPct: row.pointWinRateAfterShotPct,
+      explanation:
+        `${row.label} is a dominant shot type (${row.shareOfSonShots}% of Son shots), ` +
+        `but its error/low-yield indicators are elevated in this sample.`,
+      evidence: row.evidence,
+    }));
+
+  const allPhaseCounts = ensurePhase("all_points").counts;
+  const phaseShotMix = ["all_points", "clutch", "late_phase", "after_lost_point", "leading", "trailing"]
+    .map((phase) => {
+      const bucket = ensurePhase(phase);
+      const top = topShotRows(bucket.counts, bucket.totalSonShots);
+      const noteBits = [];
+      if (phase !== "all_points") {
+        for (const row of top) {
+          const delta = pct(row.count, bucket.totalSonShots) - pct(allPhaseCounts.get(row.shotType) || 0, sonShots);
+          if (delta >= 15) noteBits.push(`${row.label} +${delta}pp vs all points`);
+        }
+      }
+      if (phase === "clutch") {
+        const safeShare =
+          pct((bucket.counts.get("DR") || 0) + (bucket.counts.get("LF") || 0) + (bucket.counts.get("CL") || 0), bucket.totalSonShots);
+        const attackShare =
+          pct((bucket.counts.get("SM") || 0) + (bucket.counts.get("HS") || 0) + (bucket.counts.get("KL") || 0), bucket.totalSonShots);
+        const attackUE =
+          (bucket.ueByType.get("SM") || 0) + (bucket.ueByType.get("HS") || 0) + (bucket.ueByType.get("KL") || 0);
+        if (safeShare >= 70 && bucket.totalSonShots >= 5) noteBits.push("Safe shots dominate under pressure; check predictability.");
+        if (attackShare >= 30 && attackUE >= 2 && bucket.totalSonShots >= 5) noteBits.push("Attacking rises under pressure with errors; check rushing.");
+      }
+      return {
+        phase,
+        label: {
+          all_points: "All points",
+          clutch: "Clutch",
+          late_phase: "Late phase",
+          after_lost_point: "After lost point",
+          leading: "Leading",
+          trailing: "Trailing",
+        }[phase],
+        totalSonShots: bucket.totalSonShots,
+        topShotTypes: top,
+        smashShare: pct(bucket.counts.get("SM") || 0, bucket.totalSonShots),
+        dropShare: pct(bucket.counts.get("DR") || 0, bucket.totalSonShots),
+        clearShare: pct(bucket.counts.get("CL") || 0, bucket.totalSonShots),
+        liftShare: pct(bucket.counts.get("LF") || 0, bucket.totalSonShots),
+        sliceShare: pct(bucket.counts.get("SL") || 0, bucket.totalSonShots),
+        halfSmashShare: pct(bucket.counts.get("HS") || 0, bucket.totalSonShots),
+        lowSample: bucket.totalSonShots < 5,
+        sampleLevel: phaseSampleLevel(bucket.totalSonShots),
+        note: noteBits.join(" ") || (bucket.totalSonShots < 5 ? "Low sample; directional only." : ""),
+      };
+    });
+
+  const pressurePhaseChanges = phaseShotMix.filter(
+    (row) => row.phase !== "all_points" && row.note && row.totalSonShots > 0,
+  );
+
+  const zoneShotMix = [...zoneBuckets.values()]
+    .map((bucket) => {
+      const top = topShotRows(bucket.counts, bucket.totalSonShots);
+      const topShot = top[0] || null;
+      const topResponse = [...bucket.responseCounts.entries()]
+        .map(([label, count]) => ({ label, count }))
+        .sort((a, b) => b.count - a.count || a.label.localeCompare(b.label))[0] || null;
+      const ueCount = topShot ? bucket.ueByType.get(topShot.shotType) || 0 : 0;
+      return {
+        originZone: bucket.originZone,
+        label: `Z${bucket.originZone}`,
+        totalSonShots: bucket.totalSonShots,
+        topShotTypes: top,
+        topShotType: topShot,
+        topResponse,
+        ueRateByShotType: Object.fromEntries(
+          [...bucket.counts.entries()].map(([shotType, count]) => [
+            shotType,
+            {
+              count,
+              ueCount: bucket.ueByType.get(shotType) || 0,
+              ueRate: count ? (bucket.ueByType.get(shotType) || 0) / count : 0,
+              ueRatePct: pct(bucket.ueByType.get(shotType) || 0, count),
+              lowSample: count < 5,
+            },
+          ]),
+        ),
+        ueRate: topShot ? (ueCount / topShot.count) : 0,
+        ueRatePct: topShot ? pct(ueCount, topShot.count) : 0,
+        lowSample: bucket.totalSonShots < 5,
+        sampleLevel: phaseSampleLevel(bucket.totalSonShots),
+        evidence: dedupeEvidence(bucket.evidenceEvents, maxEvidence),
+        note:
+          [1, 3, 7].includes(Number(bucket.originZone)) && topShot
+            ? `From inferred Z${bucket.originZone}, ${topShot.label} is the most common response.`
+            : "",
+      };
+    })
+    .sort((a, b) => {
+      const focus = (z) => ([7, 1, 3].includes(Number(z.originZone)) ? 1 : 0);
+      return focus(b) - focus(a) || b.totalSonShots - a.totalSonShots || Number(a.originZone) - Number(b.originZone);
+    });
+
+  const topDominant = dominantShots.slice(0, 3).map((s) => `${s.label} (${s.shareOfSonShots}%)`);
+  const insightParts = [];
+  insightParts.push(
+    topDominant.length
+      ? `Son's dominant shot mix is ${topDominant.join(", ")}.`
+      : "No Son shot type reaches a dominant-share threshold yet.",
+  );
+  if (underusedVariationShots.length) {
+    insightParts.push("Variation appears limited in this sample. This does not mean the player should force deception, but adding controlled variation may reduce predictability.");
+  }
+  if (overusedLowYieldShots.length) {
+    insightParts.push(
+      `${overusedLowYieldShots.map((s) => s.label).join(", ")} combine high usage with low-yield indicators; review balance, target, and predictability before changing volume.`,
+    );
+  }
+  if (pressurePhaseChanges.length) {
+    insightParts.push("Shot mix changes under pressure; compare clutch and after-lost-point rows before prescribing tactical changes.");
+  }
+  const keyZone = zoneShotMix.find((z) => [7, 1, 3].includes(Number(z.originZone)) && z.totalSonShots >= 3);
+  if (keyZone?.topShotType) {
+    insightParts.push(`From inferred ${keyZone.label}, ${keyZone.topShotType.label} is the leading response; train an alternative if the UE rate or win follow-through is weak.`);
+  }
+
+  const coachingNotes = [
+    "Use Son Shot Mix as the coaching baseline; all-shot mix describes the match environment, not Son's choices.",
+    "Low usage may mean the opportunity did not arise, or the player is not choosing this option.",
+    "Smash usage is low in this sample; determine whether this is due to lack of attacking opportunities or conservative shot choice.",
+    "Point win rate after shot counts a rally once per Son shot type, so repeated same-type shots do not overweight a rally.",
+  ];
+
+  return {
+    totalShots,
+    sonShots,
+    opponentShots,
+    allShotMix,
+    sonShotMix,
+    opponentShotMix,
+    sonShotEffectiveness,
+    phaseShotMix,
+    zoneShotMix,
+    dominantShots,
+    infrequentShots,
+    absentShots,
+    underusedVariationShots,
+    overusedLowYieldShots,
+    pressurePhaseChanges,
+    insight: insightParts.join(" "),
+    coachingNotes,
+    sampleRules: {
+      mainMin: 5,
+      directionalMin: 3,
+      pointWinRateConvention: "A rally is counted once per Son shot type for pointWinRateAfterShot.",
+    },
+    focusShots: SHOT_MIX_FOCUS_SHOTS.map((shotType) => ({
+      shotType,
+      label: shotLabel(shotType),
+      count: sonCounts.get(shotType) || 0,
+      shareOfSonShots: pct(sonCounts.get(shotType) || 0, sonShots),
+      isVariation: SHOT_MIX_VARIATION_SHOTS.has(shotType),
+      effectiveness: effectivenessByType.get(shotType) || null,
+    })),
+  };
 };
 
 const topErrorResponse = (events) => {

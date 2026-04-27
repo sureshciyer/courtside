@@ -109,6 +109,19 @@ describe("performanceReportMarkdown", () => {
     expect(md).toMatch(/F-DR-CR to Z3/);
     expect(md).toMatch(/directional only/);
   });
+
+  it("exports Shot Mix & Effectiveness with Son mix, effectiveness, and low-sample wording", () => {
+    const rallies = [
+      stimulusRally({ shotType: "CL", zone: 7 }, { shotType: "DR", grip: "F", dir: "CR", zone: 3, quality: "Effective" }),
+      stimulusRally({ shotType: "CL", zone: 7 }, { shotType: "DR", grip: "F", dir: "CR", zone: 3, quality: "Neutral" }),
+      stimulusRally({ shotType: "CL", zone: 7 }, { shotType: "DR", grip: "F", dir: "CR", zone: 3, quality: "Ineffective" }),
+    ];
+    const md = performanceReportMarkdown([match({ rallies })]);
+    expect(md).toMatch(/Shot Mix & Effectiveness/);
+    expect(md).toMatch(/A\. Son Shot Mix/);
+    expect(md).toMatch(/B\. Son Shot Effectiveness/);
+    expect(md).toMatch(/low sample|directional only/i);
+  });
 });
 
 describe("matchAnalysisMarkdown", () => {
@@ -142,5 +155,23 @@ describe("matchAnalysisMarkdown", () => {
     });
     const md = matchAnalysisMarkdown(m);
     expect(md).toMatch(/Unforced Error Breakdown/);
+  });
+
+  it("includes Shot Mix & Effectiveness for a single match export", () => {
+    const m = match({
+      rallies: [
+        rally({
+          server: "O",
+          pointWonBy: "S",
+          result: "W",
+          shots: [
+            shot({ shotType: "CL", zone: 7 }),
+            shot({ shotType: "DR", grip: "F", dir: "CR", zone: 3 }),
+          ],
+        }),
+      ],
+    });
+    const md = matchAnalysisMarkdown(m);
+    expect(md).toMatch(/Shot Mix & Effectiveness/);
   });
 });

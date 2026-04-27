@@ -93,7 +93,7 @@ export const matchAnalysisMarkdown = (match, { playerName = "Player" } = {}) => 
   const bundle = reportBundle([match]);
   const { agg, distribution, lengthProfile, bestLengthBucket, serveReturn, clutch, fatigue,
           deception, effectiveness, winnerZones, errorZonesAll, allZones,
-          recs, advanced, confidence } = bundle;
+          recs, advanced, confidence, shotMix } = bundle;
 
   md += confidenceCallout(confidence);
   md += proLevelFindingsMarkdown(bundle);
@@ -140,6 +140,8 @@ export const matchAnalysisMarkdown = (match, { playerName = "Player" } = {}) => 
       distribution.slice(0, 12).map((s) => [s.name, s.count, `${s.pct}%`])
     );
   }
+
+  md += shotMixMarkdown(shotMix);
 
   // Zone heatmaps
   md += H2("Zone heatmaps");
@@ -429,6 +431,131 @@ const unforcedErrorsMarkdown = (data) => {
     md += P(`_${patternBelow.length} response-pattern row${patternBelow.length !== 1 ? "s" : ""} hidden below threshold (2 or fewer opportunities)._`);
   }
 
+  return md;
+};
+
+const shotMixEvidence = (evidence) =>
+  evidence?.length ? evidence.map((e) => e.label).join(", ") : "—";
+
+const shotMixTop = (rows) =>
+  rows?.length ? rows.map((r) => `${r.label} ${r.share}%`).join(", ") : "—";
+
+const shotMixMarkdown = (data) => {
+  let md = H2("Shot Mix & Effectiveness");
+  if (!data || data.totalShots === 0) {
+    md += P("_No shot-level data captured yet._");
+    return md;
+  }
+
+  md += P(
+    `Son-only mix is the coaching baseline; all-shot mix is match-environment context. ` +
+    `Total shots: **${data.totalShots}** · Son shots: **${data.sonShots}** · Opponent shots: **${data.opponentShots}**. ` +
+    `_Rates with denominator under 5 are low sample / directional only._`,
+  );
+
+  md += H3("A. Son Shot Mix");
+  const sonRows = data.sonShotMix.filter((r) => r.count >= 3).slice(0, 12);
+  if (sonRows.length) {
+    md += table(
+      ["Shot", "Count", "Share", "Rank", "Note"],
+      sonRows.map((row) => {
+        const lowYield = data.overusedLowYieldShots.find((s) => s.shotType === row.shotType);
+        const note = lowYield
+          ? "Dominant but low-yield; review context"
+          : row.count < 5
+          ? "directional only / low sample"
+          : data.dominantShots.some((s) => s.shotType === row.shotType)
+          ? "dominant Son choice"
+          : "";
+        return [row.label, row.count, `${row.pctOfSonShots}%`, row.rank, note || "—"];
+      }),
+    );
+  } else {
+    md += P("_No Son shot type reaches the 3-use directional threshold yet._");
+  }
+  const hidden = data.sonShotMix.filter((r) => r.count > 0 && r.count <= 2).length;
+  if (hidden) md += P(`_${hidden} shot type${hidden !== 1 ? "s" : ""} with 1-2 uses hidden below threshold._`);
+
+  md += H3("B. Son Shot Effectiveness");
+  const effRows = data.sonShotEffectiveness.filter((r) => r.count >= 3).slice(0, 12);
+  if (effRows.length) {
+    md += table(
+      ["Shot", "Count", "E%", "N%", "I%", "Final UE%", "Winner/FE%", "Coaching note"],
+      effRows.map((row) => {
+        const note = row.lowSample
+          ? "Low sample; avoid strong claims."
+          : row.finalShotUERatePct >= 20
+          ? "Final-shot UE rate is high; check balance and risk."
+          : row.ineffectivePct >= 25
+          ? "Often ineffective; review usage context."
+          : row.pointWinRateAfterShotPct != null && row.pointWinRateAfterShotPct <= 40
+          ? "Rallies containing this shot are not converting well."
+          : row.winnerOrFEContributionPct >= 20
+          ? "Contributing to finishes."
+          : "Stable in this sample.";
+        return [
+          row.label,
+          row.count,
+          `${row.effectivePct}%`,
+          `${row.neutralPct}%`,
+          `${row.ineffectivePct}%`,
+          `${row.finalShotUERatePct}%`,
+          `${row.winnerOrFEContributionPct}%`,
+          note,
+        ];
+      }),
+    );
+  } else {
+    md += P("_Need at least 3 uses of a Son shot type for directional effectiveness rows._");
+  }
+  md += P(`_${data.sampleRules.pointWinRateConvention}_`);
+
+  md += H3("C. Shot Mix by Phase");
+  md += table(
+    ["Phase", "Top shot types", "Drop %", "Clear %", "Lift %", "Smash %", "Slice %", "Note"],
+    data.phaseShotMix
+      .filter((row) => row.totalSonShots > 0)
+      .map((row) => [
+        row.label,
+        shotMixTop(row.topShotTypes),
+        `${row.dropShare}%`,
+        `${row.clearShare}%`,
+        `${row.liftShare}%`,
+        `${row.smashShare}%`,
+        `${row.sliceShare}%`,
+        row.note || "—",
+      ]),
+  );
+
+  md += H3("D. Zone-Specific Shot Mix");
+  const zoneRows = data.zoneShotMix.filter((row) => row.totalSonShots >= 3).slice(0, 8);
+  if (zoneRows.length) {
+    md += table(
+      ["Origin zone", "Top shot type", "Top response", "UE rate", "Evidence"],
+      zoneRows.map((row) => [
+        `${row.label}${row.lowSample ? " (directional only)" : ""}`,
+        row.topShotType ? `${row.topShotType.label} (${row.topShotType.share}%)` : "—",
+        row.topResponse?.label || "—",
+        `${row.ueRatePct}%`,
+        shotMixEvidence(row.evidence),
+      ]),
+    );
+  } else {
+    md += P("_No inferred origin zone reaches the 3-shot directional threshold yet._");
+  }
+
+  md += H3("E. Coach Insight");
+  md += P(data.insight || "_No shot-mix insight generated yet._");
+  if (data.underusedVariationShots.length) {
+    md += P(
+      `_Underused variation flags: ${data.underusedVariationShots.map((s) => s.label).join(", ")}. ` +
+      `Low usage may mean the opportunity did not arise, or the player is not choosing this option._`,
+    );
+  }
+  if (data.absentShots.length) {
+    md += P(`_Absent important options in this sample: ${data.absentShots.map((s) => s.label).join(", ")}._`);
+  }
+  md += P("_Do not treat raw count as quality; combine mix with effectiveness, phase, and origin-zone context._");
   return md;
 };
 
@@ -765,7 +892,7 @@ export const performanceReportMarkdown = (matches, { playerName = "Player", scop
   const bundle = reportBundle(matches);
   const { agg, distribution, lengthProfile, bestLengthBucket, serveReturn, clutch, fatigue,
           deception, effectiveness, winnerZones, errorZonesAll, allZones,
-          recs, advanced, confidence } = bundle;
+          recs, advanced, confidence, shotMix } = bundle;
 
   md += confidenceCallout(confidence);
   md += proLevelFindingsMarkdown(bundle);
@@ -807,6 +934,8 @@ export const performanceReportMarkdown = (matches, { playerName = "Player", scop
       distribution.slice(0, 15).map((s) => [s.name, s.count, `${s.pct}%`])
     );
   }
+
+  md += shotMixMarkdown(shotMix);
 
   // Heatmaps
   md += H2("Zone heatmaps");
