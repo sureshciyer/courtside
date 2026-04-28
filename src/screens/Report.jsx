@@ -11,12 +11,39 @@ import { performanceReportMarkdown, copyMarkdown, downloadMarkdown, slugify } fr
 // cards lose shadows/borders to render cleanly to a single PDF.
 
 export default function Report({ setScreen }) {
-  const allMatches = useMatchStore((s) => s.matches);
-  const playerName = useMatchStore((s) => s.settings?.playerName) || "Player";
+  const completedMatches = useMatchStore((s) => s.matches);
+  const currentMatch     = useMatchStore((s) => s.currentMatch);
+  const pausedMatchesRaw = useMatchStore((s) => s.pausedMatches);
+  const pausedMatches    = useMemo(() => pausedMatchesRaw || [], [pausedMatchesRaw]);
+  const playerName       = useMatchStore((s) => s.settings?.playerName) || "Player";
 
   // Scope selector: "career" (all matches), "match" (one selected), or a
   // tournament key. Defaults to career.
   const [scope, setScope] = useState("career");
+
+  // Live-preview toggle — opt in to include the live (currentMatch) and any
+  // paused matches in the report. Off by default so the report is the
+  // canonical archive view.
+  const [includeInProgress, setIncludeInProgress] = useState(false);
+
+  // The merged match list used by every analytics call below. We stash the
+  // in-progress matches at the END of the array so capture-order analyses
+  // (predictability after_lost_point, momentum chunks, trends) see them as
+  // the "latest" entries — matching how the user thinks about them.
+  const allMatches = useMemo(() => {
+    if (!includeInProgress) return completedMatches;
+    const inProgress = [
+      ...pausedMatches.map((m) => stripPausedFields(m)),
+      ...(currentMatch ? [currentMatch] : []),
+    ].filter((m) => m && (m.rallies?.length || 0) > 0);
+    return [...completedMatches, ...inProgress];
+  }, [completedMatches, currentMatch, pausedMatches, includeInProgress]);
+
+  const inProgressCount =
+    (currentMatch ? 1 : 0) + (pausedMatches?.length || 0);
+  const inProgressRallyCount =
+    (currentMatch?.rallies?.length || 0) +
+    pausedMatches.reduce((a, m) => a + (m.rallies?.length || 0), 0);
 
   const allTournaments = useMemo(() => listTournaments(allMatches), [allMatches]);
 
@@ -74,9 +101,21 @@ export default function Report({ setScreen }) {
           <div className="text-4xl mb-2">📋</div>
           <div className="font-bold text-white mb-1">No match data yet</div>
           <div className="text-sm text-neutral-400 mb-4">
-            Capture a few matches and the full report generates automatically.
+            {inProgressCount > 0
+              ? <>You have {inProgressCount} in-progress match{inProgressCount !== 1 ? "es" : ""} ({inProgressRallyCount} rallies). End a match to archive it, or enable live preview below to see draft numbers.</>
+              : <>Capture a few matches and the full report generates automatically.</>}
           </div>
-          <BigBtn tone="primary" onClick={() => setScreen("setup")}>Start first match</BigBtn>
+          {inProgressCount > 0 && (
+            <BigBtn
+              tone="warn"
+              onClick={() => setIncludeInProgress(true)}
+            >
+              ● Show live preview
+            </BigBtn>
+          )}
+          {inProgressCount === 0 && (
+            <BigBtn tone="primary" onClick={() => setScreen("setup")}>Start first match</BigBtn>
+          )}
         </Card>
       </Screen>
     );
@@ -118,10 +157,35 @@ export default function Report({ setScreen }) {
 
       {/* Scope selector */}
       <Card className="mb-3 print:hidden">
-        <div className="flex items-center justify-between mb-2">
+        <div className="flex items-center justify-between mb-2 gap-2 flex-wrap">
           <div className="text-[10px] uppercase tracking-[0.22em] text-neutral-500 font-semibold">Scope</div>
-          {matches.length === 0 && <span className="text-[11px] text-amber-400">No matches in this scope</span>}
+          <div className="flex items-center gap-2">
+            {matches.length === 0 && <span className="text-[11px] text-amber-400">No matches in this scope</span>}
+            {inProgressCount > 0 && (
+              <button
+                onClick={() => setIncludeInProgress((v) => !v)}
+                className={`px-2 py-1 rounded-full text-[11px] font-semibold border transition active:scale-95 ${
+                  includeInProgress
+                    ? "bg-amber-600 border-amber-400 text-white"
+                    : "bg-neutral-900 border-neutral-700 text-neutral-300 hover:bg-neutral-800"
+                }`}
+                title="Include the live match and any paused matches in the report"
+              >
+                {includeInProgress ? "● Live preview ON" : "○ Live preview OFF"}
+                <span className="ml-1 opacity-80 font-mono">
+                  ({inProgressCount}m / {inProgressRallyCount}r)
+                </span>
+              </button>
+            )}
+          </div>
         </div>
+        {includeInProgress && (
+          <div className="text-[11px] text-amber-300 bg-amber-950/30 border border-amber-900/50 rounded-md px-2 py-1 mb-2">
+            Live preview includes {inProgressCount} in-progress match{inProgressCount !== 1 ? "es" : ""}{" "}
+            ({inProgressRallyCount} rallies). Numbers will change as you keep capturing.
+            Treat trend / sample-size signals as draft.
+          </div>
+        )}
         <div className="flex flex-wrap gap-1.5">
           <ScopePill active={scope === "career"} onClick={() => setScope("career")}>
             Full career ({allMatches.length})
@@ -180,6 +244,11 @@ export default function Report({ setScreen }) {
             Generated {new Date().toLocaleDateString()}
           </span>
           <ConfidenceChip confidence={confidence} />
+          {includeInProgress && inProgressCount > 0 && (
+            <span className="px-1.5 py-0.5 rounded border bg-amber-950/60 text-amber-300 border-amber-800/70 text-[9px] font-bold uppercase tracking-wider print:bg-white print:text-black print:border-amber-300">
+              ● live preview
+            </span>
+          )}
         </div>
       </div>
 
@@ -2345,4 +2414,12 @@ function ScopePill({ active, onClick, children }) {
       {children}
     </button>
   );
+}
+
+// Drop the paused-only fields (_pausedRally, pausedAt) so paused matches
+// look like a regular match shape to the analytics layer.
+function stripPausedFields(pausedMatch) {
+  if (!pausedMatch) return null;
+  const { _pausedRally: _r, pausedAt: _p, ...m } = pausedMatch;
+  return m;
 }
