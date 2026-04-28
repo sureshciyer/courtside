@@ -232,6 +232,9 @@ export const matchAnalysisMarkdown = (match, { playerName = "Player" } = {}) => 
   // Predictability & response patterns
   md += predictabilityMarkdown(bundle.predictability, bundle.pressurePredictability);
 
+  // Improvement trends
+  md += improvementTrendsMarkdown(bundle.trends);
+
   // AI critique
   md += H2("🧠 AI critique");
   md += P(match.aiInsights?.trim() || "_Paste Claude / Gemini tactical analysis here, then re-export._");
@@ -1026,10 +1029,132 @@ export const performanceReportMarkdown = (matches, { playerName = "Player", scop
   // Predictability & response patterns
   md += predictabilityMarkdown(bundle.predictability, bundle.pressurePredictability);
 
+  // Improvement trends
+  md += improvementTrendsMarkdown(bundle.trends);
+
   // Raw payload
   md += H2("📦 Raw data for LLM analysis");
   md += P("Trimmed match list — paste into Claude/Gemini for follow-up analysis.");
   md += codeBlock(JSON.stringify(matches, null, 2));
+
+  return md;
+};
+
+// Improvement Trends — five sub-sections mirroring the on-screen Section 13.
+// All values are deterministic counts from trends.js helpers; this function
+// only formats them for Markdown consumption.
+const improvementTrendsMarkdown = (trends) => {
+  let md = H2("📈 Improvement trends");
+  if (!trends) {
+    md += P("_Trend analysis not available for this scope._");
+    return md;
+  }
+  const { readiness, baseline, byTournament, rolling, trainingFocus } = trends;
+
+  // A. Trend readiness
+  md += H3("A. Trend readiness");
+  md += P(
+    `**Sample level:** \`${readiness.level.replace(/_/g, " ")}\`  ` +
+    `· ${readiness.totalMatches} match${readiness.totalMatches !== 1 ? "es" : ""} ` +
+    `/ ${readiness.totalRallies} rallies`,
+  );
+  md += P(`> ${readiness.message}`);
+
+  // B. Tournament comparison
+  md += H3("B. Tournament comparison");
+  if (byTournament.length === 0) {
+    md += P("_No tournament data yet._");
+  } else {
+    md += table(
+      ["Tournament", "Matches", "Rallies", "UE %", "Clutch UE %", "Z7 UE %", "Effective %", "3-shot win %", "Status"],
+      byTournament.map(({ window: w, metrics }) => [
+        w.label,
+        w.matches.length,
+        metrics.rallies,
+        `${metrics.ueRate}%`,
+        `${metrics.clutchUERate}%`,
+        `${metrics.z7UERate}%`,
+        `${metrics.effectivePct}%`,
+        `${metrics.threeShotWinRate}%`,
+        `\`${metrics.sampleLevel.replace(/_/g, " ")}\``,
+      ]),
+    );
+  }
+
+  // C. Rolling window comparison
+  md += H3("C. Rolling window comparison");
+  const rollingBlock = (heading, block) => {
+    md += P(`**${heading}**`);
+    if (!block || (!block.previous && !block.current)) {
+      md += P("_Not enough rallies yet._");
+      return;
+    }
+    if (!block.previous) {
+      md += P(`_Only one window so far (${block.current.label}: ${block.current.count} rallies). Need a second window for comparison._`);
+      return;
+    }
+    md += table(
+      ["Metric", "Previous", "Current", "Δ", "Trend"],
+      block.comparisons.map((c) => [
+        c.metricName,
+        c.previousValue ?? "—",
+        c.currentValue ?? "—",
+        c.status === "insufficient" ? "—" : `${c.delta >= 0 ? "+" : ""}${c.delta}`,
+        `\`${c.status.replace(/_/g, " ")}\``,
+      ]),
+    );
+    md += P(
+      `_${block.previous.label}: ${block.previous.count} rallies · ` +
+      `${block.current.label}: ${block.current.count} rallies_`,
+    );
+  };
+  rollingBlock("Last 100 rallies vs previous 100", rolling.last100Rallies);
+  rollingBlock("Last 5 matches vs previous 5", rolling.last5Matches);
+
+  // D. Training focus progress
+  md += H3("D. Training focus progress");
+  if (trainingFocus.length === 0) {
+    md += P("_Need at least two windows of data to track training focus progress._");
+  } else {
+    for (const focus of trainingFocus) {
+      md += P(
+        `**${focus.title}** — Status: \`${focus.status.replace(/_/g, " ")}\` ` +
+        `(confidence: \`${focus.confidence.replace(/_/g, " ")}\`)`,
+      );
+      md += table(
+        ["Metric", "Baseline", "Latest", "Δ", "Status"],
+        focus.metrics.map((m) => [
+          m.label,
+          m.previousValue ?? "—",
+          m.currentValue ?? "—",
+          m.status === "insufficient" ? "—" : `${m.delta >= 0 ? "+" : ""}${m.delta}`,
+          `\`${m.status.replace(/_/g, " ")}\``,
+        ]),
+      );
+      md += P(
+        `_Baseline: ${focus.baselineRallies} rallies · ` +
+        `Latest: ${focus.latestRallies} rallies_`,
+      );
+    }
+  }
+
+  // E. Baseline metrics
+  md += H3("E. Current baseline metrics");
+  md += table(
+    ["Metric", "Value"],
+    [
+      ["UE %",            `${baseline.ueRate}%`],
+      ["Late-phase UE %", `${baseline.latePhaseUERate}%`],
+      ["Clutch UE %",     `${baseline.clutchUERate}%`],
+      ["Z7 UE %",         `${baseline.z7UERate}%`],
+      ["Z7 cross-drop frequency", `${baseline.z7CrossDropFrequency}%`],
+      ["3-shot win %",    `${baseline.threeShotWinRate}%`],
+      ["Effective %",     `${baseline.effectivePct}%`],
+      ["Variation usage", `${baseline.variationUsageRate}%`],
+      ["Top response frequency", `${baseline.topPredictabilityFrequency}%`],
+    ],
+  );
+  md += P("_Baseline metrics are deterministic counts from currently captured rallies. Trend claims activate once two windows of 30+ rallies each are available._");
 
   return md;
 };

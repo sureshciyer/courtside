@@ -12,6 +12,7 @@
 
 import { DISRUPTION_SHOTS, SHOT_NAMES } from "../constants/badminton.js";
 import { deriveShotContext, shotHitter } from "./rally.js";
+import { improvementTrendsReport } from "./trends.js";
 import {
   BENCHMARKS,
   PATTERN_MIN_COUNT,
@@ -846,6 +847,7 @@ export const reportBundle = (matches) => {
     shotMix,
     predictability,
     pressurePredictability: analyzePressurePredictability(matches, { allPatterns: predictability }),
+    trends: improvementTrendsReport(matches),
   };
 };
 

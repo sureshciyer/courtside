@@ -95,7 +95,7 @@ export default function Report({ setScreen }) {
           clutch, fatigue, deception, effectiveness,
           winnerZones, errorZonesAll, allZones, recs, advanced, confidence,
           leaks, serveThirdShot, zoneWeakness, trainingPlan,
-          unforcedErrors, shotMix, predictability, pressurePredictability } = bundle;
+          unforcedErrors, shotMix, predictability, pressurePredictability, trends } = bundle;
   const wonMatches = matches.filter((m) => {
     const setsWon = m.sets.filter((s) => s.sonScore > s.oppScore).length;
     return setsWon > m.sets.length / 2;
@@ -218,6 +218,7 @@ export default function Report({ setScreen }) {
             ["a10", "10. Tactical cleverness"],
             ["a11", "11. Coaching recommendations"],
             ["a12", "12. Predictability & response patterns"],
+            ["a13", "13. Improvement trends"],
           ]} onNav={scrollTo} />
           <TocSection label="Part B: Drill-down" items={[
             ...tournaments.map((t, i) => ["t" + i, t.name]),
@@ -508,6 +509,10 @@ export default function Report({ setScreen }) {
         pressureComparisons={pressurePredictability}
         confidence={confidence}
       />
+
+      {/* 13. Improvement trends */}
+      <SH id="a13" n="13" t="Improvement trends" />
+      <ImprovementTrends trends={trends} />
 
       {/* ===================== PART B ===================== */}
       <PartHeader label="B" title="Tournament drill-down" />
@@ -1378,6 +1383,263 @@ function ClassChip({ label }) {
     <span className={`px-1.5 py-0.5 rounded border text-[9px] font-bold uppercase tracking-wider ${tone} print:bg-white print:text-black print:border-neutral-400`}>
       {text}
     </span>
+  );
+}
+
+// ===================================================================
+//                       IMPROVEMENT TRENDS (Section 13)
+//  Sub-sections:
+//    A. Trend readiness         — gating + baseline message
+//    B. Tournament comparison   — table per tournament
+//    C. Rolling window comparison — last 100 rallies / last 5 matches
+//    D. Training focus progress  — focus-area roll-up
+//    E. Baseline metrics         — fallback when not enough data
+// ===================================================================
+function ImprovementTrends({ trends }) {
+  if (!trends) return null;
+  const { readiness, baseline, byTournament, rolling, trainingFocus } = trends;
+
+  return (
+    <div className="flex flex-col gap-4">
+      {/* A. Trend readiness */}
+      <SubSection label="A" title="Trend readiness">
+        <div className={`rounded-md p-3 text-xs leading-relaxed border ${
+          readiness.canCompare
+            ? "bg-sky-950/40 border-sky-900/60 text-sky-200 print:bg-sky-50 print:text-black print:border-sky-300"
+            : "bg-amber-950/40 border-amber-900/60 text-amber-200 print:bg-amber-50 print:text-black print:border-amber-300"
+        }`}>
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded border bg-neutral-900 print:bg-white">
+              {readiness.level.replace(/_/g, " ")}
+            </span>
+            <span className="font-mono">{readiness.totalMatches}m / {readiness.totalRallies}r</span>
+          </div>
+          <div className="mt-1.5">{readiness.message}</div>
+        </div>
+      </SubSection>
+
+      {/* B. Tournament comparison */}
+      <SubSection label="B" title="Tournament comparison">
+        {byTournament.length === 0 ? (
+          <Empty>No tournament data captured yet.</Empty>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-[11px] border-collapse">
+              <thead>
+                <tr className="bg-neutral-800 text-neutral-300 print:bg-neutral-200 print:text-black">
+                  <Th>Tournament</Th>
+                  <Th>Matches</Th>
+                  <Th>Rallies</Th>
+                  <Th>UE %</Th>
+                  <Th>Clutch UE %</Th>
+                  <Th>Z7 UE %</Th>
+                  <Th>Effective %</Th>
+                  <Th>3-shot win %</Th>
+                  <Th>Status</Th>
+                </tr>
+              </thead>
+              <tbody>
+                {byTournament.map(({ window: w, metrics }, i) => (
+                  <tr key={i} className="bg-neutral-900 print:bg-white border-b border-neutral-800 print:border-neutral-300">
+                    <Td className="font-semibold text-neutral-100 print:text-black">{w.label}</Td>
+                    <Td className="font-mono">{w.matches.length}</Td>
+                    <Td className="font-mono">{metrics.rallies}</Td>
+                    <Td className="font-mono">{metrics.ueRate}%</Td>
+                    <Td className="font-mono">{metrics.clutchUERate}%</Td>
+                    <Td className="font-mono">{metrics.z7UERate}%</Td>
+                    <Td className="font-mono">{metrics.effectivePct}%</Td>
+                    <Td className="font-mono">{metrics.threeShotWinRate}%</Td>
+                    <Td><SampleChip level={metrics.sampleLevel} /></Td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </SubSection>
+
+      {/* C. Rolling window comparison */}
+      <SubSection label="C" title="Rolling window comparison">
+        <RollingWindowBlock
+          title="Last 100 rallies vs previous 100"
+          window={rolling.last100Rallies}
+        />
+        <RollingWindowBlock
+          title="Last 5 matches vs previous 5"
+          window={rolling.last5Matches}
+        />
+      </SubSection>
+
+      {/* D. Training focus progress */}
+      <SubSection label="D" title="Training focus progress">
+        {trainingFocus.length === 0 ? (
+          <Empty>Need at least two windows of data to track training focus progress.</Empty>
+        ) : (
+          <div className="flex flex-col gap-3">
+            {trainingFocus.map((focus) => <TrainingFocusBlock key={focus.id} focus={focus} />)}
+          </div>
+        )}
+      </SubSection>
+
+      {/* E. Baseline metrics */}
+      <SubSection label="E" title="Current baseline metrics">
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+          <Stat l="UE %"          v={`${baseline.ueRate}%`}          tone={baseline.ueRate >= 25 ? "bad" : "default"} />
+          <Stat l="Late UE %"     v={`${baseline.latePhaseUERate}%`} tone={baseline.latePhaseUERate >= 25 ? "bad" : "default"} />
+          <Stat l="Clutch UE %"   v={`${baseline.clutchUERate}%`}    tone={baseline.clutchUERate >= 25 ? "bad" : "default"} />
+          <Stat l="Z7 UE %"       v={`${baseline.z7UERate}%`}        tone={baseline.z7UERate >= 25 ? "bad" : "default"} />
+          <Stat l="3-shot win %"  v={`${baseline.threeShotWinRate}%`} tone={baseline.threeShotWinRate >= 55 ? "good" : "warn"} />
+          <Stat l="Effective %"   v={`${baseline.effectivePct}%`}    tone={baseline.effectivePct >= 35 ? "good" : "warn"} />
+          <Stat l="Z7 cross-drop" v={`${baseline.z7CrossDropFrequency}%`} />
+          <Stat l="Variation %"   v={`${baseline.variationUsageRate}%`} />
+        </div>
+        <div className="text-[11px] text-neutral-500 mt-2">
+          Baseline metrics are deterministic counts from currently captured rallies.
+          Trend claims activate once two windows of 30+ rallies each are available.
+        </div>
+      </SubSection>
+    </div>
+  );
+}
+
+// Sub-section wrapper with a small "A / B / ..." label.
+function SubSection({ label, title, children }) {
+  return (
+    <div>
+      <div className="flex items-baseline gap-2 mb-1.5">
+        <span className="text-[10px] font-mono text-emerald-400 print:text-black">{label}.</span>
+        <span className="text-[11px] uppercase tracking-wider font-semibold text-emerald-300 print:text-black">{title}</span>
+      </div>
+      {children}
+    </div>
+  );
+}
+
+const TREND_TONE = {
+  strong_improvement: "bg-emerald-700 text-white border-emerald-500",
+  improvement:        "bg-emerald-950/60 text-emerald-300 border-emerald-800/70",
+  stable:             "bg-neutral-800 text-neutral-300 border-neutral-700",
+  regression:         "bg-amber-950/60 text-amber-300 border-amber-800/70",
+  strong_regression:  "bg-red-700 text-white border-red-500",
+  insufficient:       "bg-neutral-900 text-neutral-500 border-neutral-700",
+};
+
+function TrendChip({ status }) {
+  const tone = TREND_TONE[status] || TREND_TONE.stable;
+  const text = (status || "stable").replace(/_/g, " ");
+  return (
+    <span className={`px-1.5 py-0.5 rounded border text-[9px] font-bold uppercase tracking-wider ${tone} print:bg-white print:text-black print:border-neutral-400`}>
+      {text}
+    </span>
+  );
+}
+
+const SAMPLE_TONE = {
+  insufficient:     "bg-neutral-900 text-neutral-500 border-neutral-700",
+  very_directional: "bg-amber-950/60 text-amber-300 border-amber-800/70",
+  directional:      "bg-amber-950/40 text-amber-300 border-amber-900/60",
+  moderate:         "bg-sky-950/60 text-sky-300 border-sky-800/70",
+  reliable:         "bg-emerald-950/60 text-emerald-300 border-emerald-800/70",
+};
+function SampleChip({ level }) {
+  const tone = SAMPLE_TONE[level] || SAMPLE_TONE.directional;
+  return (
+    <span className={`px-1.5 py-0.5 rounded border text-[9px] font-bold uppercase tracking-wider ${tone} print:bg-white print:text-black print:border-neutral-400`}>
+      {(level || "directional").replace(/_/g, " ")}
+    </span>
+  );
+}
+
+function RollingWindowBlock({ title, window }) {
+  if (!window || (!window.previous && !window.current)) {
+    return (
+      <div className="mb-2">
+        <div className="text-[11px] uppercase tracking-wider text-neutral-500 mb-1">{title}</div>
+        <Empty>Not enough rallies yet.</Empty>
+      </div>
+    );
+  }
+  const { previous, current, comparisons } = window;
+  return (
+    <div className="mb-3">
+      <div className="text-[11px] uppercase tracking-wider text-neutral-500 mb-1">{title}</div>
+      {!previous ? (
+        <div className="bg-neutral-900 border border-neutral-800 rounded-md p-3 text-xs text-neutral-400 print:border-neutral-400 print:bg-white">
+          Only one window so far ({current?.label}: {current?.count} rallies). Need a second window for comparison.
+        </div>
+      ) : (
+        <div className="overflow-x-auto">
+          <table className="w-full text-[11px] border-collapse">
+            <thead>
+              <tr className="bg-neutral-800 text-neutral-300 print:bg-neutral-200 print:text-black">
+                <Th>Metric</Th>
+                <Th>Previous</Th>
+                <Th>Current</Th>
+                <Th>Delta</Th>
+                <Th>Trend</Th>
+              </tr>
+            </thead>
+            <tbody>
+              {comparisons.map((c) => (
+                <tr key={c.metricName} className="bg-neutral-900 print:bg-white border-b border-neutral-800 print:border-neutral-300">
+                  <Td className="font-semibold text-neutral-200 print:text-black">{c.metricName}</Td>
+                  <Td className="font-mono">{c.previousValue ?? "—"}</Td>
+                  <Td className="font-mono">{c.currentValue ?? "—"}</Td>
+                  <Td className={`font-mono ${c.delta > 0 ? "text-amber-300" : c.delta < 0 ? "text-emerald-300" : "text-neutral-400"}`}>
+                    {c.status === "insufficient" ? "—" : `${c.delta >= 0 ? "+" : ""}${c.delta}`}
+                  </Td>
+                  <Td><TrendChip status={c.status} /></Td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          <div className="text-[10px] text-neutral-500 mt-1">
+            {previous.label}: {previous.count} rallies · {current.label}: {current.count} rallies
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function TrainingFocusBlock({ focus }) {
+  return (
+    <div className="bg-neutral-900 border border-neutral-800 rounded-md p-3 print:bg-white print:border-neutral-400">
+      <div className="flex items-center justify-between gap-2 flex-wrap mb-2">
+        <div className="font-bold text-neutral-100 print:text-black">{focus.title}</div>
+        <div className="flex items-center gap-2">
+          <SampleChip level={focus.confidence} />
+          <TrendChip status={focus.status} />
+        </div>
+      </div>
+      <table className="w-full text-[11px] border-collapse">
+        <thead>
+          <tr className="bg-neutral-800/60 text-neutral-300 print:bg-neutral-200 print:text-black">
+            <Th>Metric</Th>
+            <Th>Baseline</Th>
+            <Th>Latest</Th>
+            <Th>Δ</Th>
+            <Th>Status</Th>
+          </tr>
+        </thead>
+        <tbody>
+          {focus.metrics.map((m) => (
+            <tr key={m.name} className="border-b border-neutral-800 print:border-neutral-300">
+              <Td className="text-neutral-200 print:text-black">{m.label}</Td>
+              <Td className="font-mono">{m.previousValue ?? "—"}</Td>
+              <Td className="font-mono">{m.currentValue ?? "—"}</Td>
+              <Td className={`font-mono ${m.status === "insufficient" ? "text-neutral-500" : ""}`}>
+                {m.status === "insufficient" ? "—" : `${m.delta >= 0 ? "+" : ""}${m.delta}`}
+              </Td>
+              <Td><TrendChip status={m.status} /></Td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      <div className="text-[10px] text-neutral-500 mt-1">
+        Baseline: {focus.baselineRallies} rallies · Latest: {focus.latestRallies} rallies
+      </div>
+    </div>
   );
 }
 
