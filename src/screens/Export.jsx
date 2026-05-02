@@ -16,7 +16,9 @@ export default function Export({ setScreen }) {
   const matchCounter = useMatchStore((s) => s.matchCounter) || 0;
   const settings = useMatchStore((s) => s.settings);
   const syncStatus = useMatchStore((s) => s.syncStatus) || {};
+  const currentMatch = useMatchStore((s) => s.currentMatch);
   const applyBackupMerge = useMatchStore((s) => s.applyBackupMerge);
+  const replaceAll = useMatchStore((s) => s.replaceAll);
   const recordBackupDownload = useMatchStore((s) => s.recordBackupDownload);
 
   const totalRallies = matches.reduce((a, m) => a + m.rallies.length, 0);
@@ -85,6 +87,55 @@ export default function Export({ setScreen }) {
     applyBackupMerge(patch, stats);
     setImportState({ phase: "done", preview: stats, incoming: null, error: null, warning: null });
     debugLog.info("import", "backup merged", stats);
+  };
+
+  // Destructive recovery path. Wipes EVERYTHING in localStorage and replaces
+  // it with the backup file's contents verbatim. Use only when local state
+  // is corrupted / you want a hard reset to a known-good snapshot. Strongly
+  // confirmed because it can't be undone.
+  const confirmReplaceAll = () => {
+    if (!importState.incoming) return;
+    const data = importState.incoming;
+    const incomingMatches = (data.matches || []).length;
+    const incomingPaused = (data.pausedMatches || []).length;
+    const localMatches = matches.length;
+    const localPaused = pausedMatches.length;
+    const localLive = currentMatch ? 1 : 0;
+    const ok = window.confirm(
+      "⚠ Replace ALL local data?\n\n" +
+      `This DELETES your current localStorage and replaces it with the backup file:\n\n` +
+      `  • Matches: ${localMatches} (local) → ${incomingMatches} (from backup)\n` +
+      `  • Paused: ${localPaused} (local) → ${incomingPaused} (from backup)\n` +
+      `  • Live match: ${localLive ? "1 (will be discarded)" : "none"}\n\n` +
+      `This cannot be undone. Type "REPLACE" in the next prompt to proceed.`
+    );
+    if (!ok) return;
+    const confirmation = window.prompt('Type REPLACE (in capital letters) to confirm:');
+    if (confirmation !== "REPLACE") {
+      debugLog.info("import", "replace-all cancelled at confirmation");
+      return;
+    }
+    // Build a full state object from the backup envelope and stamp the
+    // restore marker so the sync-status indicator updates too.
+    replaceAll({
+      matches: data.matches || [],
+      pausedMatches: data.pausedMatches || [],
+      currentMatch: data.currentMatch || null,
+      currentRally: data.currentRally || null,
+      matchCounter: data.matchCounter || (data.matches?.length || 0),
+      opponents: data.opponents || {},
+    });
+    debugLog.info("import", "replace-all applied", {
+      incomingMatches, incomingPaused,
+      replacedLocalMatches: localMatches, replacedLocalPaused: localPaused,
+    });
+    setImportState({
+      phase: "done",
+      preview: { addedMatches: incomingMatches, skippedMatches: 0, addedPaused: incomingPaused, addedOpponentProfiles: Object.keys(data.opponents || {}).length, filledOpponentFields: 0, totalIncomingMatches: incomingMatches },
+      incoming: null,
+      error: null,
+      warning: "Local data was replaced — local state is now exactly the backup file.",
+    });
   };
 
   const cancelImport = () =>
@@ -193,6 +244,16 @@ export default function Export({ setScreen }) {
               >
                 Cancel
               </button>
+            </div>
+            <button
+              onClick={confirmReplaceAll}
+              className="w-full mt-2 py-2 rounded-lg bg-red-950/50 hover:bg-red-900/60 border border-red-800 text-red-200 text-xs font-semibold active:scale-95"
+              title="Wipe local state and restore exactly what's in this file. Use only for recovery."
+            >
+              ⚠ Replace ALL local data with this file
+            </button>
+            <div className="text-[10px] text-neutral-500 mt-1 leading-relaxed">
+              Replace-all wipes all current matches, paused matches, opponents, and any live capture, then loads the backup verbatim. Use only when local state is corrupted and you want a clean restore from this file.
             </div>
           </div>
         )}

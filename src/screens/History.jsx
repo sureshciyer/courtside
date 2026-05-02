@@ -35,11 +35,20 @@ export default function History({ setScreen }) {
   const handleReopen = (m) => {
     const liveActive = currentMatch && !currentMatch.completed;
     const liveNote = liveActive
-      ? `\n\nNote: your live match (vs ${currentMatch.opponent || "—"}) will auto-pause first.`
+      ? `\n\n⚠ Your live match (vs ${currentMatch.opponent || "—"}) will auto-pause first.`
       : "";
+    // Show what will be carried over so the user knows the data is preserved.
+    const setSummary = m.sets
+      .map((s, i) => {
+        const ralliesInSet = m.rallies.filter((r) => r.set === i + 1).length;
+        return `  • Set ${i + 1}: ${s.sonScore}-${s.oppScore} (${ralliesInSet} rall${ralliesInSet !== 1 ? "ies" : "y"})`;
+      })
+      .join("\n");
     const ok = window.confirm(
       `Reopen match ${m.id} (vs ${m.opponent})?\n\n` +
-      `It will move from History → Live capture so you can keep adding rallies (or tap Next set to start a new set).${liveNote}`
+      `${m.rallies.length} captured rall${m.rallies.length !== 1 ? "ies" : "y"} will be preserved:\n${setSummary}\n\n` +
+      `It will move from History → Live capture so you can keep adding rallies. ` +
+      `Tap "📋 Log" in Capture to see existing rallies. Tap "Next set" to start a new set.${liveNote}`
     );
     if (!ok) return;
     reopenMatch(m.id);

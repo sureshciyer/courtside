@@ -51,6 +51,12 @@ export default function Capture({ setScreen }) {
   const [showLog, setShowLog] = useState(false);
   const [gridFlipped, setGridFlipped] = useState(false); // visual-only: rotates the CourtGrid 180° for video notation when son is on the far side
   const [toast, setToast] = useState(null);
+  // Show a one-time hint banner when this Capture mounts on a match that
+  // already has saved rallies (typical for Reopen / Resume). Dismissible,
+  // and auto-dismissed once the user commits a new shot.
+  const [showHistoryHint, setShowHistoryHint] = useState(
+    () => (m?.rallies?.length || 0) > 0
+  );
 
   useEffect(() => { if (!m) setScreen("home"); }, [m, setScreen]);
   if (!m || !rally) return null;
@@ -93,6 +99,9 @@ export default function Capture({ setScreen }) {
     setDirOverridden(false);
     if (shotDir) setDirection(shotDir);
     setDeception("none");
+    // Once the user has committed a shot they've engaged with the screen;
+    // the "we kept your old data" banner has done its job.
+    if (showHistoryHint) setShowHistoryHint(false);
     if (finishAfter) {
       setFinishAfter(false);
       setShowResult(true);
@@ -238,6 +247,26 @@ export default function Capture({ setScreen }) {
       )}
 
       <Scoreboard onBack={() => setScreen("home")} />
+
+      {showHistoryHint && (
+        <div className="bg-amber-950/40 border-b border-amber-800/60 px-3 py-2 text-[12px] text-amber-100 leading-snug flex items-start gap-2">
+          <div className="flex-1">
+            <span className="font-bold text-amber-300">Reopened — </span>
+            {m.rallies.length} saved rall{m.rallies.length !== 1 ? "ies" : "y"} carried over (
+            {m.sets.map((s, i) => {
+              const n = m.rallies.filter((r) => r.set === i + 1).length;
+              return `Set ${i + 1}: ${n}`;
+            }).join(" · ")}
+            ). Tap <span className="font-mono font-bold">📋 Log</span> below to see them. Tap <span className="font-mono font-bold">Next set</span> to begin a new set.
+          </div>
+          <button
+            onClick={() => setShowHistoryHint(false)}
+            className="shrink-0 px-2 py-0.5 rounded bg-amber-900/60 border border-amber-700 text-amber-200 text-[10px] font-bold hover:bg-amber-900"
+          >
+            ✕
+          </button>
+        </div>
+      )}
 
       <Timeline
         shots={rally.shots}
