@@ -11,6 +11,8 @@ import {
 export default function History({ setScreen }) {
   const matches = useMatchStore((s) => s.matches);
   const playerName = useMatchStore((s) => s.settings?.playerName) || "Player";
+  const reopenMatch = useMatchStore((s) => s.reopenMatch);
+  const currentMatch = useMatchStore((s) => s.currentMatch);
   const [flash, setFlash] = useState(null);
 
   const toast = (msg) => {
@@ -28,6 +30,20 @@ export default function History({ setScreen }) {
     const md = matchAnalysisMarkdown(m, { playerName });
     downloadMarkdown(md, `courtside_${m.id}_${slugify(m.opponent)}.md`);
     toast(`${m.id} downloaded`);
+  };
+
+  const handleReopen = (m) => {
+    const liveActive = currentMatch && !currentMatch.completed;
+    const liveNote = liveActive
+      ? `\n\nNote: your live match (vs ${currentMatch.opponent || "—"}) will auto-pause first.`
+      : "";
+    const ok = window.confirm(
+      `Reopen match ${m.id} (vs ${m.opponent})?\n\n` +
+      `It will move from History → Live capture so you can keep adding rallies (or tap Next set to start a new set).${liveNote}`
+    );
+    if (!ok) return;
+    reopenMatch(m.id);
+    setScreen("capture");
   };
 
   return (
@@ -87,6 +103,13 @@ export default function History({ setScreen }) {
                   className="flex-1 px-2 py-1 rounded-md bg-neutral-900 hover:bg-neutral-800 border border-neutral-700 text-neutral-300 text-[11px] font-semibold active:scale-95"
                 >
                   ⬇ Download .md
+                </button>
+                <button
+                  onClick={() => handleReopen(m)}
+                  className="flex-1 px-2 py-1 rounded-md bg-amber-900/40 hover:bg-amber-900/60 border border-amber-800 text-amber-200 text-[11px] font-semibold active:scale-95"
+                  title="Move this match back to live capture so you can keep adding rallies / sets"
+                >
+                  ↻ Reopen
                 </button>
               </div>
             </Card>

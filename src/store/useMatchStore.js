@@ -264,6 +264,46 @@ export const useMatchStore = create(
           };
         }),
 
+      // Reopen a previously-completed match. Use cases:
+      //   - Imported a backup where a match was wrongly stamped completed
+      //   - Hit "End match" too early and want to keep capturing
+      // Behaviour:
+      //   - Pulls the match out of `matches` (the archive)
+      //   - Marks it `completed: false`
+      //   - Auto-parks the current live match (if any) to pausedMatches
+      //   - Sets it as currentMatch and seeds a fresh currentRally at the
+      //     latest set's running score
+      // The user can then capture more rallies in the existing set, or tap
+      // Next set in Capture to start a new set.
+      reopenMatch: (matchId) =>
+        set((state) => {
+          const idx = state.matches.findIndex((m) => m.id === matchId);
+          if (idx < 0) return {};
+          const target = state.matches[idx];
+          const reopened = { ...target, completed: false };
+
+          // Park the live match (if any) to avoid silent overwrite.
+          const parked = state.currentMatch && !state.currentMatch.completed
+            ? [...state.pausedMatches, packMatch(state.currentMatch, state.currentRally)]
+            : state.pausedMatches;
+
+          const setIdx = reopened.currentSet ?? (reopened.sets.length - 1);
+          const lastSet = reopened.sets[setIdx] || { sonScore: 0, oppScore: 0 };
+          const freshRally = initRally(
+            reopened.id,
+            setIdx,
+            lastSet.sonScore,
+            lastSet.oppScore,
+          );
+
+          return {
+            matches: state.matches.filter((_, i) => i !== idx),
+            pausedMatches: parked,
+            currentMatch: { ...reopened, currentSet: setIdx },
+            currentRally: freshRally,
+          };
+        }),
+
       // ---------- score ----------
       adjustScore: (side, delta) =>
         set((state) => {
