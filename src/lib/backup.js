@@ -19,6 +19,11 @@ export const makeBackup = (state) => ({
   playerName: state.settings?.playerName || "",
   matches: state.matches || [],
   pausedMatches: state.pausedMatches || [],
+  // The live match being captured right now and its in-progress rally.
+  // Included so a download mid-match doesn't silently drop work. Will be
+  // null on a fresh export with no live capture in progress.
+  currentMatch: state.currentMatch || null,
+  currentRally: state.currentRally || null,
   matchCounter: state.matchCounter || 0,
   opponents: state.opponents || {},
   // Settings are included so a fresh-device restore also brings back the
@@ -121,6 +126,45 @@ export const mergeBackup = (current, incoming) => {
     mergedOpponents[key] = patched;
   }
 
+  // --- live match (currentMatch + currentRally) ---
+  // The backup may carry an in-progress match. Decide where it lands:
+  //   1. If its id already exists anywhere local (matches, paused, current),
+  //      skip — local wins, no overwrites.
+  //   2. Else if local has NO live match, restore as currentMatch + currentRally.
+  //   3. Else (local already has a live match), park the incoming live match
+  //      into pausedMatches so nothing is overwritten. The user can resume
+  //      it from Home if they want it active.
+  let mergedCurrentMatch = current.currentMatch || null;
+  let mergedCurrentRally = current.currentRally || null;
+  let liveOutcome = "none"; // "restored" | "parked" | "skipped" | "none"
+
+  const incomingLive = incoming?.currentMatch || null;
+  const incomingLiveRally = incoming?.currentRally || null;
+  if (incomingLive && incomingLive.id) {
+    const liveId = incomingLive.id;
+    const existsAsCompleted = matchIds.has(liveId);
+    const existsAsPaused = pausedIds.has(liveId);
+    const isLocalLive = current.currentMatch?.id === liveId;
+    if (existsAsCompleted || existsAsPaused || isLocalLive) {
+      liveOutcome = "skipped";
+    } else if (!current.currentMatch) {
+      // Slot available — restore the backup's live match directly.
+      mergedCurrentMatch = incomingLive;
+      mergedCurrentRally = incomingLiveRally || null;
+      liveOutcome = "restored";
+    } else {
+      // Local is already capturing — park backup's live match instead.
+      const packed = {
+        ...incomingLive,
+        _pausedRally: incomingLiveRally || null,
+        pausedAt: Date.now(),
+      };
+      mergedPaused.push(packed);
+      pausedIds.add(liveId);
+      liveOutcome = "parked";
+    }
+  }
+
   // --- match counter: take max, bumped above merged length ---
   const mergedCounter = Math.max(
     current.matchCounter || 0,
@@ -128,13 +172,22 @@ export const mergeBackup = (current, incoming) => {
     mergedMatches.length
   );
 
+  // Build the patch. currentMatch / currentRally are only included when
+  // the merge actually produces a value, so a no-op merge (no incoming
+  // live match) doesn't accidentally overwrite local live state with null.
+  const patch = {
+    matches: mergedMatches,
+    pausedMatches: mergedPaused,
+    opponents: mergedOpponents,
+    matchCounter: mergedCounter,
+  };
+  if (liveOutcome === "restored") {
+    patch.currentMatch = mergedCurrentMatch;
+    patch.currentRally = mergedCurrentRally;
+  }
+
   return {
-    patch: {
-      matches: mergedMatches,
-      pausedMatches: mergedPaused,
-      opponents: mergedOpponents,
-      matchCounter: mergedCounter,
-    },
+    patch,
     stats: {
       addedMatches: addedMatches.length,
       skippedMatches: skippedMatches.length,
@@ -142,6 +195,7 @@ export const mergeBackup = (current, incoming) => {
       addedOpponentProfiles: addedProfiles,
       filledOpponentFields: filledFields,
       totalIncomingMatches: incomingMatches.length,
+      liveOutcome, // "restored" | "parked" | "skipped" | "none"
     },
   };
 };

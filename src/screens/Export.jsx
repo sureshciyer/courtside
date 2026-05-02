@@ -226,6 +226,19 @@ export default function Export({ setScreen }) {
             <PreviewRow label="Paused matches to add" value={importState.preview.addedPaused} />
             <PreviewRow label="New opponent profiles" value={importState.preview.addedOpponentProfiles} />
             <PreviewRow label="Existing profiles to fill empty fields" value={importState.preview.filledOpponentFields} />
+            {importState.preview.liveOutcome && importState.preview.liveOutcome !== "none" && (
+              <div className="mt-2 p-2 rounded bg-sky-950/40 border border-sky-800 text-[11px] text-sky-200 leading-relaxed">
+                {importState.preview.liveOutcome === "restored" && (
+                  <>📥 Backup carries an in-progress live match — will be restored as the active capture.</>
+                )}
+                {importState.preview.liveOutcome === "parked" && (
+                  <>⏸ Backup carries a live match, but you already have one in progress. Backup's will be parked into the Paused list (your local capture is untouched).</>
+                )}
+                {importState.preview.liveOutcome === "skipped" && (
+                  <>↩ Backup's live match has the same ID as an existing local match. Skipped.</>
+                )}
+              </div>
+            )}
             {importState.warning && (
               <div className="mt-2 p-2 rounded bg-amber-950/40 border border-amber-800 text-[11px] text-amber-200 leading-relaxed">
                 ⚠️ {importState.warning}
