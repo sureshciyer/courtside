@@ -1,4 +1,4 @@
-import { SHOT_CODES, DISRUPTION_SHOTS } from "../../constants/badminton.js";
+import { SHOT_CODES, DISRUPTION_SHOTS, SHOT_KEY_BY_CODE } from "../../constants/badminton.js";
 import { DIRS } from "../../constants/badminton.js";
 
 // Shot-type palette for the right half of the capture screen. Shows either
@@ -109,16 +109,32 @@ const TONE = {
 
 function ShotBtn({ tone, code, label, armed, disruption, onTap }) {
   const t = TONE[tone];
+  const hotkey = SHOT_KEY_BY_CODE[code];
   return (
     <button
       onClick={onTap}
       className={`relative rounded-lg px-2 py-2 border text-left transition active:scale-95 ${armed ? `${t.armed} animate-pulse-arm` : `${t.bg} ${t.idle}`}`}
+      title={hotkey ? `${label} — keyboard: ${hotkey}` : label}
     >
       <div className="flex items-center justify-between">
         <span className="font-mono font-bold text-sm tracking-tight">{code}</span>
-        {disruption && !armed && (
-          <span className="w-1.5 h-1.5 rounded-full bg-amber-400" title="Auto-tags as Disruption" />
-        )}
+        <div className="flex items-center gap-1">
+          {disruption && !armed && (
+            <span className="w-1.5 h-1.5 rounded-full bg-amber-400" title="Auto-tags as Disruption" />
+          )}
+          {hotkey && (
+            <kbd
+              className={`hidden md:inline-block font-mono text-[9px] leading-none px-1 py-0.5 rounded border ${
+                armed
+                  ? "bg-white/15 text-white border-white/40"
+                  : "bg-neutral-950 text-neutral-300 border-neutral-700"
+              }`}
+              aria-label={`Keyboard shortcut ${hotkey}`}
+            >
+              {hotkey}
+            </kbd>
+          )}
+        </div>
       </div>
       <div className={`text-[10px] mt-0.5 leading-tight ${armed ? "text-white/80" : "text-neutral-400"}`}>
         {label}

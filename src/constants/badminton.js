@@ -91,3 +91,43 @@ export const ZONE_LABELS = {
 
 // The report is personalised to this player by default; user can rename later.
 export const PLAYER_NAME = "Arjun";
+
+// ===================================================================
+//  KEYBOARD SHORTCUTS  (Capture screen, V1)
+//
+//  Two modes — same keys would clash if we treated them as one global
+//  map, so we split: rally mode (every shot after the serve) and serve
+//  mode (first shot of the rally). The Capture screen knows which mode
+//  it's in and only consumes the matching map.
+//
+//  Mnemonic: first letter of the shot name where free, fallback otherwise.
+// ===================================================================
+export const SHOT_HOTKEYS_RALLY = {
+  s: "SM",   // Smash
+  h: "HS",   // Half-smash
+  d: "DR",   // Drop
+  x: "SL",   // Slice  (s taken)
+  c: "CL",   // Clear
+  v: "DV",   // Drive  (d taken)
+  p: "PS",   // Push
+  l: "LF",   // Lift
+  b: "BL",   // Block
+  n: "NT",   // Net
+  k: "KL",   // Kill
+  o: "LB",   // Lob    (l taken)
+};
+
+export const SHOT_HOTKEYS_SERVE = {
+  q: "LS",   // Low serve
+  w: "FS",   // Flick serve
+  e: "DS",   // Drive serve
+};
+
+// Reverse lookup: shotType -> key. Used by ShotPalette to render the
+// little ᴋᴇʏ hint on each pill so the bindings are self-documenting.
+const buildReverseMap = (m) =>
+  Object.fromEntries(Object.entries(m).map(([k, v]) => [v, k]));
+export const SHOT_KEY_BY_CODE = {
+  ...buildReverseMap(SHOT_HOTKEYS_RALLY),
+  ...buildReverseMap(SHOT_HOTKEYS_SERVE),
+};

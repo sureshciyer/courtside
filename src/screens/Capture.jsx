@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useMatchStore } from "../store/useMatchStore.js";
 import {
   autoRole,
@@ -8,7 +8,12 @@ import {
   cycleGrip,
   cycleDirection,
 } from "../lib/rally.js";
-import { DISRUPTION_SHOTS, SHOT_CODES } from "../constants/badminton.js";
+import {
+  DISRUPTION_SHOTS,
+  SHOT_CODES,
+  SHOT_HOTKEYS_RALLY,
+  SHOT_HOTKEYS_SERVE,
+} from "../constants/badminton.js";
 import Scoreboard from "../components/capture/Scoreboard.jsx";
 import Timeline from "../components/capture/Timeline.jsx";
 import CourtGrid from "../components/capture/CourtGrid.jsx";
@@ -59,6 +64,18 @@ export default function Capture({ setScreen }) {
   );
 
   useEffect(() => { if (!m) setScreen("home"); }, [m, setScreen]);
+
+  // ---------- keyboard shortcuts (V1) ----------
+  // We install a single global keydown listener once and dispatch through a
+  // ref so the listener stays stable while reading the latest closures every
+  // render. This pattern lets us keep the existing `if (!m || !rally) return
+  // null` early-return below without breaking the rules-of-hooks ordering.
+  const onKeyRef = useRef(() => {});
+  useEffect(() => {
+    const handler = (e) => onKeyRef.current(e);
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, []);
   if (!m || !rally) return null;
 
   const flash = (msg) => { setToast(msg); setTimeout(() => setToast(null), 1400); };
@@ -237,6 +254,78 @@ export default function Capture({ setScreen }) {
   const focusedQuality = focused?.quality || "Neutral";
   const focusedDeception = focused?.deceptionType || "none";
   const displayDirection = isEditing ? (focused.dir || "ST") : direction;
+
+  // Keyboard handler — assigned to the ref every render so it captures the
+  // latest closures (state setters, derived values, handler closures).
+  // Rally mode: 12-letter shot map + 1–9 zones + Backspace/Esc/Enter.
+  // Serve mode: q/w/e for LS/FS/DS plus 1–9 zones.
+  // Result-bar mode (when showResult): w/f/u pick result type, s/o pick winner,
+  // Enter confirms with a sensible default winner, Esc cancels.
+  onKeyRef.current = (e) => {
+    const isTypingTarget = (el) =>
+      !!el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.isContentEditable);
+    if (isTypingTarget(e.target)) return;
+    if (e.metaKey || e.ctrlKey || e.altKey) return;
+    if (e.key === "Tab") return; // let the browser handle focus traversal
+    if (serverPicker) return;
+
+    if (showResult) {
+      const k = e.key.toLowerCase();
+      if (k === "escape") {
+        e.preventDefault();
+        setShowResult(false);
+        setPendingResult(null);
+        return;
+      }
+      if (k === "w") { e.preventDefault(); setPendingResult("W");  return; }
+      if (k === "f") { e.preventDefault(); setPendingResult("FE"); return; }
+      if (k === "u") { e.preventDefault(); setPendingResult("UE"); return; }
+      if (k === "s") { e.preventDefault(); handleFinish(pendingResult || "W",  "S"); return; }
+      if (k === "o") { e.preventDefault(); handleFinish(pendingResult || "UE", "O"); return; }
+      if (k === "enter") {
+        e.preventDefault();
+        const winner = pendingResult === "UE" ? "O" : "S";
+        handleFinish(pendingResult || "W", winner);
+      }
+      return;
+    }
+
+    const k = e.key.toLowerCase();
+
+    if (k === "escape") {
+      e.preventDefault();
+      if (isEditing) setFocusedIdx(null);
+      else setArmedShot(null);
+      return;
+    }
+
+    if (k === "backspace") {
+      e.preventDefault();
+      handleUndo();
+      return;
+    }
+
+    if (k === "enter") {
+      e.preventDefault();
+      if (!isEditing) setShowResult(true);
+      return;
+    }
+
+    if (e.key >= "1" && e.key <= "9") {
+      const zone = Number(e.key);
+      if (!isEditing && !armedShot) return;
+      e.preventDefault();
+      handleZoneTap(zone);
+      return;
+    }
+
+    const map = paletteMode === "serve" ? SHOT_HOTKEYS_SERVE : SHOT_HOTKEYS_RALLY;
+    const shotType = map[k];
+    if (shotType) {
+      e.preventDefault();
+      handleShotArm(shotType);
+    }
+  };
 
   return (
     <div className="capture-dark min-h-screen flex flex-col bg-neutral-950 text-neutral-100 font-display">
