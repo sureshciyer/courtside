@@ -17,6 +17,7 @@ export default function Export({ setScreen }) {
   const settings = useMatchStore((s) => s.settings);
   const syncStatus = useMatchStore((s) => s.syncStatus) || {};
   const currentMatch = useMatchStore((s) => s.currentMatch);
+  const currentRally = useMatchStore((s) => s.currentRally);
   const applyBackupMerge = useMatchStore((s) => s.applyBackupMerge);
   const replaceAll = useMatchStore((s) => s.replaceAll);
   const recordBackupDownload = useMatchStore((s) => s.recordBackupDownload);
@@ -26,7 +27,13 @@ export default function Export({ setScreen }) {
 
   // ---------- backup (export) ----------
   const [copied, setCopied] = useState(false);
-  const buildBackup = () => makeBackup({ matches, pausedMatches, opponents, matchCounter, settings });
+  // currentMatch + currentRally are included so a download mid-capture
+  // doesn't silently drop the live match. makeBackup tolerates nulls.
+  const buildBackup = () =>
+    makeBackup({
+      matches, pausedMatches, opponents, matchCounter, settings,
+      currentMatch, currentRally,
+    });
   const backupJson = () => JSON.stringify(buildBackup(), null, 2);
 
   const downloadBackup = () => {
