@@ -49,6 +49,7 @@ export default function Capture({ setScreen }) {
   const [deception, setDeception] = useState("none");   // default deception tag for the next commit (resets after each commit)
   const [direction, setDirection] = useState("ST");     // sticky direction for the next commit
   const [dirOverridden, setDirOverridden] = useState(false); // user manually touched direction during the current arm
+  const [gripOverride, setGripOverride] = useState(null);    // null | "F" | "B" — Tab key cycles for the next commit, then resets
   const [focusedIdx, setFocusedIdx] = useState(null);
   const [finishAfter, setFinishAfter] = useState(false);
   const [showResult, setShowResult] = useState(false);
@@ -95,7 +96,9 @@ export default function Capture({ setScreen }) {
     let shotGrip = null;
     let shotDir = null;
     if (!isServeShot) {
-      shotGrip = guessGrip(zone, prevGrip, handedness);
+      // Grip override (Tab key) wins over the auto-derived guess. Used for
+      // round-the-head shots where auto would pick the wrong side.
+      shotGrip = gripOverride || guessGrip(zone, prevGrip, handedness);
       // If the user manually set a direction this arm cycle, respect that.
       // Otherwise auto-suggest from the prev vs next zone sides.
       shotDir = dirOverridden ? direction : suggestDirection(prevZone, zone, direction);
@@ -110,12 +113,14 @@ export default function Capture({ setScreen }) {
       deceptionType: deception,
     });
     // Reset arm state; carry direction forward as the new sticky default.
-    // Deception is *not* sticky — most shots aren't deceptive, so we reset
+    // Deception and grip override are *not* sticky — most shots aren't
+    // deceptive and most grips are auto-derived correctly, so we reset
     // each commit to avoid silently tagging unrelated shots.
     setArmedShot(null);
     setDirOverridden(false);
     if (shotDir) setDirection(shotDir);
     setDeception("none");
+    setGripOverride(null);
     // Once the user has committed a shot they've engaged with the screen;
     // the "we kept your old data" banner has done its job.
     if (showHistoryHint) setShowHistoryHint(false);
@@ -228,6 +233,7 @@ export default function Capture({ setScreen }) {
     setDirection("ST");
     setDirOverridden(false);
     setDeception("none");
+    setGripOverride(null);
     flash("Rally saved");
   };
 
@@ -240,6 +246,7 @@ export default function Capture({ setScreen }) {
     setDirection("ST");
     setDirOverridden(false);
     setDeception("none");
+    setGripOverride(null);
   };
 
   const handleEndMatch = () => { endMatch(); setScreen("summary"); };
@@ -266,8 +273,26 @@ export default function Capture({ setScreen }) {
       !!el && (el.tagName === "INPUT" || el.tagName === "TEXTAREA" || el.isContentEditable);
     if (isTypingTarget(e.target)) return;
     if (e.metaKey || e.ctrlKey || e.altKey) return;
-    if (e.key === "Tab") return; // let the browser handle focus traversal
     if (serverPicker) return;
+
+    // Tab cycles grip:
+    //   - editing a shot: directly cycles the focused shot's grip
+    //   - rally mode with a shot armed: cycles the next-commit grip override
+    //   - otherwise: leave Tab alone so the browser can move focus
+    if (e.key === "Tab") {
+      if (isEditing) {
+        e.preventDefault();
+        handleCycleGrip(focusedIdx);
+        return;
+      }
+      if (armedShot && paletteMode !== "serve") {
+        e.preventDefault();
+        const next = gripOverride === "F" ? "B" : "F";
+        setGripOverride(next);
+        flash(`Grip → ${next === "F" ? "Forehand" : "Backhand"} (next shot)`);
+      }
+      return;
+    }
 
     if (showResult) {
       const k = e.key.toLowerCase();
@@ -386,6 +411,15 @@ export default function Capture({ setScreen }) {
             <div className="flex items-center gap-3 flex-wrap">
               <QualityToggle value={quality} onChange={handleQualityChange} />
               <DeceptionToggle value={deception} onChange={handleDeceptionChange} />
+              {gripOverride && (
+                <button
+                  onClick={() => setGripOverride(null)}
+                  title="Clear grip override (set by Tab)"
+                  className="px-1.5 py-0.5 rounded border bg-amber-950/60 text-amber-300 border-amber-800/70 text-[10px] font-bold uppercase tracking-wider hover:bg-amber-900/60"
+                >
+                  Grip: {gripOverride === "F" ? "FH" : "BH"}
+                </button>
+              )}
             </div>
             <div className="flex items-center gap-2">
               <button
