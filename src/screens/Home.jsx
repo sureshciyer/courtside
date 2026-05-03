@@ -136,6 +136,9 @@ export default function Home({ setScreen }) {
           <BigBtn tone="accent" onClick={() => setScreen("report")}>
             Full performance report
           </BigBtn>
+          <BigBtn tone="secondary" onClick={() => setScreen("customReport")}>
+            📋 Custom report (selected sections)
+          </BigBtn>
         </>
       )}
       {/* Backup/Restore is always reachable — a brand-new device needs

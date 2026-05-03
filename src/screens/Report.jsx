@@ -994,10 +994,13 @@ function ProLevelFindings({
 //  Coach-facing UE split. Count = where mistakes happened most; rate =
 //  mistakes divided by opportunities for that zone/pattern.
 // ===================================================================
-function UnforcedErrorBreakdown({ data }) {
+// `omit` lets a caller drop sub-tables. Custom Report uses
+// omit=["origin_zone", "top_patterns"] to keep just the insight summary.
+export function UnforcedErrorBreakdown({ data, omit = [] }) {
   if (!data || data.totalUEs === 0) {
     return <Empty>No Son unforced errors captured in this scope.</Empty>;
   }
+  const skip = (key) => omit.includes(key);
 
   const originMain = data.ueByInferredOriginZone.filter((row) => row.sampleLevel === "main");
   const originDirectional = data.ueByInferredOriginZone.filter((row) => row.sampleLevel === "directional_only");
@@ -1015,39 +1018,43 @@ function UnforcedErrorBreakdown({ data }) {
         </div>
       </div>
 
-      <UETableFrame title="UE by inferred origin zone" belowCount={originBelow.length}>
-        {originMain.length === 0 && originDirectional.length === 0 ? (
-          <tbody>
-            <tr>
-              <Td colSpan={6} className="text-neutral-500 print:text-black">
-                No origin-zone denominator reaches the 3-opportunity directional threshold yet.
-              </Td>
-            </tr>
-          </tbody>
-        ) : (
-          <tbody>
-            {originMain.map((row) => <UEOriginRow key={row.key} row={row} />)}
-            {originDirectional.map((row) => <UEOriginRow key={row.key} row={row} directional />)}
-          </tbody>
-        )}
-      </UETableFrame>
+      {!skip("origin_zone") && (
+        <UETableFrame title="UE by inferred origin zone" belowCount={originBelow.length}>
+          {originMain.length === 0 && originDirectional.length === 0 ? (
+            <tbody>
+              <tr>
+                <Td colSpan={6} className="text-neutral-500 print:text-black">
+                  No origin-zone denominator reaches the 3-opportunity directional threshold yet.
+                </Td>
+              </tr>
+            </tbody>
+          ) : (
+            <tbody>
+              {originMain.map((row) => <UEOriginRow key={row.key} row={row} />)}
+              {originDirectional.map((row) => <UEOriginRow key={row.key} row={row} directional />)}
+            </tbody>
+          )}
+        </UETableFrame>
+      )}
 
-      <UETableFrame title="Top UE patterns" belowCount={patternBelow.length} pattern>
-        {patternMain.length === 0 && patternDirectional.length === 0 ? (
-          <tbody>
-            <tr>
-              <Td colSpan={6} className="text-neutral-500 print:text-black">
-                No response-pattern denominator reaches the 3-opportunity directional threshold yet.
-              </Td>
-            </tr>
-          </tbody>
-        ) : (
-          <tbody>
-            {patternMain.map((row) => <UEPatternRow key={row.key} row={row} />)}
-            {patternDirectional.map((row) => <UEPatternRow key={row.key} row={row} directional />)}
-          </tbody>
-        )}
-      </UETableFrame>
+      {!skip("top_patterns") && (
+        <UETableFrame title="Top UE patterns" belowCount={patternBelow.length} pattern>
+          {patternMain.length === 0 && patternDirectional.length === 0 ? (
+            <tbody>
+              <tr>
+                <Td colSpan={6} className="text-neutral-500 print:text-black">
+                  No response-pattern denominator reaches the 3-opportunity directional threshold yet.
+                </Td>
+              </tr>
+            </tbody>
+          ) : (
+            <tbody>
+              {patternMain.map((row) => <UEPatternRow key={row.key} row={row} />)}
+              {patternDirectional.map((row) => <UEPatternRow key={row.key} row={row} directional />)}
+            </tbody>
+          )}
+        </UETableFrame>
+      )}
     </div>
   );
 }
@@ -1572,7 +1579,7 @@ function ImprovementTrends({ trends }) {
 }
 
 // Sub-section wrapper with a small "A / B / ..." label.
-function SubSection({ label, title, children }) {
+export function SubSection({ label, title, children }) {
   return (
     <div>
       <div className="flex items-baseline gap-2 mb-1.5">
@@ -1593,7 +1600,7 @@ const TREND_TONE = {
   insufficient:       "bg-neutral-900 text-neutral-500 border-neutral-700",
 };
 
-function TrendChip({ status }) {
+export function TrendChip({ status }) {
   const tone = TREND_TONE[status] || TREND_TONE.stable;
   const text = (status || "stable").replace(/_/g, " ");
   return (
@@ -1610,7 +1617,7 @@ const SAMPLE_TONE = {
   moderate:         "bg-sky-950/60 text-sky-300 border-sky-800/70",
   reliable:         "bg-emerald-950/60 text-emerald-300 border-emerald-800/70",
 };
-function SampleChip({ level }) {
+export function SampleChip({ level }) {
   const tone = SAMPLE_TONE[level] || SAMPLE_TONE.directional;
   return (
     <span className={`px-1.5 py-0.5 rounded border text-[9px] font-bold uppercase tracking-wider ${tone} print:bg-white print:text-black print:border-neutral-400`}>
@@ -1619,7 +1626,7 @@ function SampleChip({ level }) {
   );
 }
 
-function RollingWindowBlock({ title, window }) {
+export function RollingWindowBlock({ title, window }) {
   if (!window || (!window.previous && !window.current)) {
     return (
       <div className="mb-2">
@@ -1671,7 +1678,7 @@ function RollingWindowBlock({ title, window }) {
   );
 }
 
-function TrainingFocusBlock({ focus }) {
+export function TrainingFocusBlock({ focus }) {
   return (
     <div className="bg-neutral-900 border border-neutral-800 rounded-md p-3 print:bg-white print:border-neutral-400">
       <div className="flex items-center justify-between gap-2 flex-wrap mb-2">
@@ -1724,7 +1731,7 @@ function FindingCard({ n, title, children }) {
   );
 }
 
-function PartHeader({ label, title }) {
+export function PartHeader({ label, title }) {
   return (
     <div className="bg-emerald-800 border border-emerald-600 rounded-lg px-4 py-2.5 mt-8 mb-3 print:bg-emerald-100 print:border-emerald-500 print:text-black print:break-before-page">
       <div className="text-[11px] text-emerald-200 font-semibold print:text-emerald-900">Part {label}</div>
@@ -1733,7 +1740,7 @@ function PartHeader({ label, title }) {
   );
 }
 
-function SH({ id, n, t }) {
+export function SH({ id, n, t }) {
   return (
     <h2
       id={id}
@@ -1930,7 +1937,7 @@ function RecoveryLeakView({ data }) {
 }
 
 // ---- Momentum chunks ----
-function MomentumChunksView({ data }) {
+export function MomentumChunksView({ data }) {
   if (data.total === 0) return <Empty>No 3+ consecutive-loss streaks detected — good momentum control.</Empty>;
   return (
     <div className="flex flex-col gap-2">
@@ -1969,15 +1976,19 @@ function MomentumChunksView({ data }) {
   );
 }
 
-function Grid({ c, children }) {
+export function Grid({ c, children }) {
   const cols = { 2: "grid-cols-2", 3: "grid-cols-2 sm:grid-cols-3", 4: "grid-cols-2 sm:grid-cols-4", 5: "grid-cols-2 sm:grid-cols-5" };
   return <div className={`grid ${cols[c] || cols[3]} gap-2`}>{children}</div>;
 }
 
-function ShotMixEffectivenessSection({ data }) {
+// `sections` controls which subsections render (A=Mix, B=Effectiveness,
+// C=Phase, D=Zone). The Custom Report uses ["A","B"] to keep the header
+// dense and skip the heavier subsections.
+export function ShotMixEffectivenessSection({ data, sections = ["A", "B", "C", "D"] }) {
   if (!data || data.totalShots === 0) {
     return <Empty>No shot-level data captured yet.</Empty>;
   }
+  const wants = (key) => sections.includes(key);
   const sonMixRows = data.sonShotMix.filter((r) => r.count >= 3).slice(0, 10);
   const hiddenSonRows = data.sonShotMix.filter((r) => r.count > 0 && r.count <= 2).length;
   const effRows = data.sonShotEffectiveness.filter((r) => r.count >= 3).slice(0, 10);
@@ -2010,6 +2021,7 @@ function ShotMixEffectivenessSection({ data }) {
         {" "}{data.totalShots} total shots, {data.sonShots} Son shots, {data.opponentShots} opponent shots.
       </p>
 
+      {wants("A") && (
       <div>
         <MiniLabel>A. Son Shot Mix</MiniLabel>
         {sonMixRows.length ? (
@@ -2036,7 +2048,9 @@ function ShotMixEffectivenessSection({ data }) {
           </div>
         )}
       </div>
+      )}
 
+      {wants("B") && (
       <div>
         <MiniLabel>B. Son Shot Effectiveness</MiniLabel>
         {effRows.length ? (
@@ -2061,7 +2075,9 @@ function ShotMixEffectivenessSection({ data }) {
           </div>
         ) : <Empty>Need at least 3 uses of a Son shot type for directional effectiveness rows.</Empty>}
       </div>
+      )}
 
+      {wants("C") && (
       <div>
         <MiniLabel>C. Shot Mix by Phase</MiniLabel>
         <div className="overflow-x-auto">
@@ -2084,7 +2100,9 @@ function ShotMixEffectivenessSection({ data }) {
           </table>
         </div>
       </div>
+      )}
 
+      {wants("D") && (
       <div>
         <MiniLabel>D. Zone-Specific Shot Mix</MiniLabel>
         {zoneRows.length ? (
@@ -2106,6 +2124,7 @@ function ShotMixEffectivenessSection({ data }) {
           </div>
         ) : <Empty>No inferred origin zone reaches the directional threshold yet.</Empty>}
       </div>
+      )}
 
       <Insight>
         <b>Coach insight:</b> {data.insight} {data.coachingNotes?.[1]}
@@ -2114,7 +2133,7 @@ function ShotMixEffectivenessSection({ data }) {
   );
 }
 
-function Stat({ l, v, s, tone = "default" }) {
+export function Stat({ l, v, s, tone = "default" }) {
   const tones = {
     default: "text-white",
     good: "text-emerald-400",
@@ -2130,14 +2149,14 @@ function Stat({ l, v, s, tone = "default" }) {
   );
 }
 
-function MiniLabel({ children }) {
+export function MiniLabel({ children }) {
   return <div className="text-[10px] uppercase tracking-wider font-semibold text-neutral-500 mb-1">{children}</div>;
 }
 
 // Compact confidence indicator — one chip rendered next to the report
 // header and (smaller) inline at the top of every confidence-sensitive
 // section. Single source of truth for tone.
-function ConfidenceChip({ confidence, compact = false }) {
+export function ConfidenceChip({ confidence, compact = false }) {
   if (!confidence) return null;
   const tones = {
     warn: "bg-amber-950/60 text-amber-300 border-amber-800/70 print:bg-amber-50 print:text-black print:border-amber-300",
@@ -2159,7 +2178,7 @@ function ConfidenceChip({ confidence, compact = false }) {
   );
 }
 
-function Insight({ children }) {
+export function Insight({ children }) {
   return (
     <div className="bg-emerald-950/40 border border-emerald-800/70 rounded-md p-3 mt-3 text-xs text-emerald-200 leading-relaxed print:bg-emerald-50 print:text-black print:border-emerald-300">
       <b className="text-emerald-300 print:text-black">Key insight:</b> {children}
@@ -2170,7 +2189,7 @@ function Insight({ children }) {
 // Data-driven insight for the rally-length section. Falls back to a neutral
 // message when no bucket has enough sample size — never claims "short
 // rallies are best" unless the data actually says so.
-function RallyLengthInsight({ best }) {
+export function RallyLengthInsight({ best }) {
   if (!best || !best.bucket) {
     return (
       <Insight>
@@ -2191,7 +2210,7 @@ function RallyLengthInsight({ best }) {
   );
 }
 
-function Flag({ children }) {
+export function Flag({ children }) {
   return (
     <div className="bg-amber-950/40 border border-amber-800/70 rounded-md p-3 mt-3 text-xs text-amber-200 leading-relaxed print:bg-amber-50 print:text-black print:border-amber-300">
       <b className="text-amber-300 print:text-black">Flag:</b> {children}
@@ -2199,7 +2218,7 @@ function Flag({ children }) {
   );
 }
 
-function Empty({ children }) {
+export function Empty({ children }) {
   return (
     <div className="bg-neutral-900 border border-neutral-800 rounded-lg p-4 text-sm text-neutral-500 text-center print:border-neutral-400">
       {children}
@@ -2249,7 +2268,7 @@ function TocSection({ label, items, onNav }) {
   );
 }
 
-function BenchCard({ l, target, player, src }) {
+export function BenchCard({ l, target, player, src }) {
   return (
     <div className="bg-neutral-900 border border-neutral-800 rounded-lg p-2.5 text-center print:border-neutral-400 print:bg-white">
       <div className="text-[10px] uppercase tracking-wider text-neutral-500">{l}</div>
@@ -2260,7 +2279,7 @@ function BenchCard({ l, target, player, src }) {
   );
 }
 
-function Ring({ pct: p }) {
+export function Ring({ pct: p }) {
   const stroke = p >= 55 ? "#10b981" : p >= 45 ? "#f59e0b" : "#ef4444";
   const textColor = p >= 55 ? "text-emerald-400" : p >= 45 ? "text-amber-400" : "text-red-400";
   return (
@@ -2319,7 +2338,7 @@ function HGrid({ data, tone, small }) {
   );
 }
 
-function EffSlice({ pct, label, className }) {
+export function EffSlice({ pct, label, className }) {
   if (pct === 0) return null;
   return (
     <div
@@ -2354,12 +2373,12 @@ function AppTable({ rows }) {
   );
 }
 
-function Th({ children }) { return <th className="px-2 py-1.5 text-left font-semibold border-b border-neutral-700 print:border-neutral-400">{children}</th>; }
-function Td({ children, className = "", ...props }) {
+export function Th({ children }) { return <th className="px-2 py-1.5 text-left font-semibold border-b border-neutral-700 print:border-neutral-400">{children}</th>; }
+export function Td({ children, className = "", ...props }) {
   return <td {...props} className={`px-2 py-1 border-b border-neutral-800 print:border-neutral-300 ${className}`}>{children}</td>;
 }
 
-function ZoneDiagram({ playerName = "Player" }) {
+export function ZoneDiagram({ playerName = "Player" }) {
   return (
     <div>
       <div className="bg-red-950/50 border border-red-900 rounded-t-lg p-2 print:bg-red-50 print:border-red-300">
@@ -2390,7 +2409,7 @@ function ZoneCell({ n }) {
   );
 }
 
-function PrintBtn({ onClick }) {
+export function PrintBtn({ onClick }) {
   return (
     <button
       onClick={onClick}
@@ -2401,7 +2420,7 @@ function PrintBtn({ onClick }) {
   );
 }
 
-function ScopePill({ active, onClick, children }) {
+export function ScopePill({ active, onClick, children }) {
   return (
     <button
       onClick={onClick}
