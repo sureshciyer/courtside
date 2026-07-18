@@ -93,6 +93,9 @@ export const useMatchStore = create(
         lastBackupMatchCount: 0,
         lastRestoreAt: null,
         lastRestoreStats: null,
+        // Google Drive cloud sync markers
+        lastCloudSyncAt: null,
+        lastCloudSyncStats: null,
       },
 
       // Tactical goals the user has set for the next match. Each entry:
@@ -108,6 +111,32 @@ export const useMatchStore = create(
 
       updateSettings: (patch) =>
         set((state) => ({ settings: { ...state.settings, ...patch } })),
+
+      // ---------- Mode 2: post-match reflection ----------
+      // Which match the Reflection screen should edit, and where to return
+      // after save/back. Transient UI state — intentionally NOT persisted
+      // (excluded from partialize below).
+      reflectTargetId: null,
+      reflectReturn: "summary",
+      openReflection: (matchId, returnScreen = "summary") =>
+        set({ reflectTargetId: matchId, reflectReturn: returnScreen }),
+
+      // Attach/update the structured reflection on a completed match.
+      saveReflection: (matchId, reflection) =>
+        set((state) => ({
+          matches: state.matches.map((m) =>
+            m.id === matchId
+              ? {
+                  ...m,
+                  reflection: {
+                    ...reflection,
+                    createdAt: m.reflection?.createdAt || Date.now(),
+                    updatedAt: Date.now(),
+                  },
+                }
+              : m
+          ),
+        })),
 
       // ---------- goals ----------
       addGoal: (goal) => set((state) => ({ goals: [...state.goals, goal] })),
@@ -538,6 +567,16 @@ export const useMatchStore = create(
 
       // Called after a successful download — sets the last-backup marker
       // so the Backup/Restore screen and Debug panel can show "X h ago".
+      // Stamp a successful Google Drive sync so the UI can show "synced Xm ago".
+      recordCloudSync: (stats = null) =>
+        set((state) => ({
+          syncStatus: {
+            ...state.syncStatus,
+            lastCloudSyncAt: Date.now(),
+            lastCloudSyncStats: stats,
+          },
+        })),
+
       recordBackupDownload: (matchCount) =>
         set((state) => ({
           syncStatus: {

@@ -3,6 +3,7 @@ import { useMatchStore } from "../store/useMatchStore.js";
 import { Screen, TopBar, BigBtn, Card, SectionLabel } from "../components/ui.jsx";
 import { makeBackup, parseBackup, mergeBackup, BACKUP_VERSION } from "../lib/backup.js";
 import { debugLog, relativeTime } from "../lib/debugLog.js";
+import { syncWithDrive, hasValidToken } from "../lib/driveSync.js";
 
 // Backup / Restore hub. Three sections:
 //   1. Backup       — full JSON envelope download (safe restore target)
@@ -21,6 +22,8 @@ export default function Export({ setScreen }) {
   const applyBackupMerge = useMatchStore((s) => s.applyBackupMerge);
   const replaceAll = useMatchStore((s) => s.replaceAll);
   const recordBackupDownload = useMatchStore((s) => s.recordBackupDownload);
+  const recordCloudSync = useMatchStore((s) => s.recordCloudSync);
+  const googleClientId = settings?.googleClientId || "";
 
   const totalRallies = matches.reduce((a, m) => a + m.rallies.length, 0);
   const opponentCount = Object.keys(opponents).length;
@@ -48,6 +51,50 @@ export default function Export({ setScreen }) {
     URL.revokeObjectURL(url);
     recordBackupDownload(matches.length);
     debugLog.info("export", "backup downloaded", { filename, matches: matches.length });
+  };
+
+  // ---------- Google Drive cloud sync ----------
+  const [cloud, setCloud] = useState({ phase: "idle", message: null });
+
+  const handleCloudSync = async () => {
+    setCloud({ phase: "working", message: "Connecting to Google Drive…" });
+    try {
+      const result = await syncWithDrive({
+        clientId: googleClientId,
+        // Merge the remote backup into local state (non-destructive).
+        applyRemote: (remoteData) => {
+          const st = useMatchStore.getState();
+          const current = {
+            matches: st.matches,
+            pausedMatches: st.pausedMatches,
+            opponents: st.opponents,
+            matchCounter: st.matchCounter,
+            currentMatch: st.currentMatch,
+            currentRally: st.currentRally,
+          };
+          const { patch, stats } = mergeBackup(current, remoteData);
+          applyBackupMerge(patch, stats);
+          return stats;
+        },
+        // Snapshot AFTER the merge so the push carries remote+local union.
+        buildJson: () => {
+          const st = useMatchStore.getState();
+          return JSON.stringify(makeBackup(st));
+        },
+      });
+      recordCloudSync(result.stats);
+      const added = result.stats?.addedMatches || 0;
+      setCloud({
+        phase: "done",
+        message: result.pulled
+          ? `Synced ✓ — pulled ${added} new match${added !== 1 ? "es" : ""} from Drive, pushed ${useMatchStore.getState().matches.length} total.`
+          : "Synced ✓ — first upload created in your Drive.",
+      });
+      debugLog.info("cloudSync", "drive sync ok", result.stats || {});
+    } catch (e) {
+      setCloud({ phase: "error", message: e.message });
+      debugLog.error("cloudSync", e, {});
+    }
   };
 
   // ---------- restore (import) ----------
@@ -176,6 +223,57 @@ export default function Export({ setScreen }) {
         subtitle={`${matches.length} match${matches.length !== 1 ? "es" : ""} · ${totalRallies} rallies · ${opponentCount} opponents`}
         onBack={() => setScreen("home")}
       />
+
+      {/* ==================== GOOGLE DRIVE SYNC ==================== */}
+      <Card className="mb-3" tone={googleClientId ? "accent" : "default"}>
+        <SectionLabel>☁️ Google Drive sync</SectionLabel>
+        {!googleClientId ? (
+          <>
+            <p className="text-[11px] text-neutral-400 leading-relaxed mb-2">
+              Sync your data to a private file in your own Google Drive so any
+              iPad, laptop, or browser signed into your Google account can load
+              it. Needs a one-time (free) Google Client ID.
+            </p>
+            <BigBtn tone="secondary" onClick={() => setScreen("settings")}>
+              Set up in Settings →
+            </BigBtn>
+          </>
+        ) : (
+          <>
+            <p className="text-[11px] text-neutral-400 leading-relaxed mb-2">
+              Pull the cloud backup, merge it with this device (nothing is
+              overwritten — matches dedupe by ID), then push the combined data
+              back. Run this after capturing on any device, and before starting
+              on a new one.
+            </p>
+            <button
+              onClick={handleCloudSync}
+              disabled={cloud.phase === "working"}
+              className={`w-full py-3 rounded-lg font-bold text-sm active:scale-95 ${
+                cloud.phase === "working"
+                  ? "bg-neutral-800 text-neutral-500 cursor-wait"
+                  : "bg-sky-700 hover:bg-sky-600 text-white"
+              }`}
+            >
+              {cloud.phase === "working" ? "Syncing…" : `🔄 Sync now${hasValidToken(googleClientId) ? "" : " (Google sign-in)"}`}
+            </button>
+            {cloud.message && (
+              <div className={`mt-2 text-[11px] leading-relaxed rounded-md px-2.5 py-2 border ${
+                cloud.phase === "error"
+                  ? "bg-red-950/40 border-red-800 text-red-300"
+                  : "bg-emerald-950/40 border-emerald-800 text-emerald-300"
+              }`}>
+                {cloud.message}
+              </div>
+            )}
+            {syncStatus.lastCloudSyncAt && cloud.phase === "idle" && (
+              <div className="text-[10px] text-neutral-500 mt-2">
+                Last cloud sync {relativeTime(syncStatus.lastCloudSyncAt)}
+              </div>
+            )}
+          </>
+        )}
+      </Card>
 
       {/* ==================== SYNC STATUS ==================== */}
       <SyncStatusCard

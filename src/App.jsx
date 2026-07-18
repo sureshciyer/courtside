@@ -10,6 +10,8 @@ import Report from "./screens/Report.jsx";
 import CustomReport from "./screens/CustomReport.jsx";
 import SettingsScreen from "./screens/Settings.jsx";
 import Scouting from "./screens/Scouting.jsx";
+import Reflection from "./screens/Reflection.jsx";
+import ReflectionTrends from "./screens/ReflectionTrends.jsx";
 
 const SCREENS = {
   home: Home,
@@ -22,6 +24,8 @@ const SCREENS = {
   report: Report,
   customReport: CustomReport,
   scouting: Scouting,
+  reflection: Reflection,
+  reflectionTrends: ReflectionTrends,
   settings: SettingsScreen,
 };
 
