@@ -48,6 +48,26 @@ export default function Settings({ setScreen }) {
         </p>
       </Card>
 
+      <Card className="mb-3">
+        <SectionLabel>☁️ Cloud sync (Google Drive)</SectionLabel>
+        <Field
+          label="Google OAuth Client ID"
+          value={settings.googleClientId || ""}
+          onChange={(v) => updateSettings({ googleClientId: v.trim() })}
+          placeholder="1234567890-xxxx.apps.googleusercontent.com"
+        />
+        <p className="text-[11px] text-neutral-500 leading-relaxed -mt-1">
+          One-time setup: create a free OAuth Client ID at{" "}
+          <span className="text-emerald-400 font-mono">console.cloud.google.com</span>{" "}
+          (APIs &amp; Services → Credentials → OAuth client ID → Web application),
+          add this site's URL under "Authorized JavaScript origins", enable the
+          Google Drive API, and paste the Client ID here. Then use "Sync now" on
+          the Backup / Restore screen. Data is stored in a hidden app-private
+          folder in your own Google Drive — this app never sees the rest of your
+          Drive.
+        </p>
+      </Card>
+
       <DebugPanel />
 
       <Card className="mb-3 text-[11px] text-neutral-500 leading-relaxed">

@@ -86,6 +86,7 @@ export const matchAnalysisMarkdown = (match, { playerName = "Player" } = {}) => 
   if (!rallies.length) {
     md += H2("No rally data captured");
     md += P("_This match was ended without any shot-level data._");
+    md += reflectionMarkdown(match);
     md += rawDataBlock(match);
     return md;
   }
@@ -234,6 +235,9 @@ export const matchAnalysisMarkdown = (match, { playerName = "Player" } = {}) => 
 
   // Improvement trends
   md += improvementTrendsMarkdown(bundle.trends);
+
+  // Player reflection (Mode 2) — subjective self-assessment, if captured.
+  md += reflectionMarkdown(match);
 
   // AI critique
   md += H2("🧠 AI critique");
@@ -850,6 +854,43 @@ const deriveOpponentTraps = (bundle) => {
   }
 
   return traps;
+};
+
+// Renders the Mode 2 post-match reflection as a Markdown section so LLM
+// critique can weigh the player's own read against the objective tallies.
+// Returns "" when no reflection was captured.
+const reflectionMarkdown = (match) => {
+  const r = match?.reflection;
+  if (!r) return "";
+  const rated = Object.entries(r.ratings || {}).filter(([, v]) => v != null);
+  const any = rated.length || (r.styleTags || []).length || (r.strengths || []).length || (r.weaknesses || []).length;
+  if (!any) return "";
+
+  const LABELS = {
+    netSpin: "Net spin & tumble",
+    paceVariation: "Pace variation",
+    defenseReaction: "Defense reaction speed",
+    smashDefense: "Handling smashes to lines",
+    footwork: "Footwork & recovery",
+    focus: "Focus & composure",
+    energy: "Energy level",
+  };
+
+  let md = H2("📝 Player reflection (self-assessment)");
+  if (match.matchType || match.format) {
+    md += P(`**Context:** ${[match.matchType, match.format].filter(Boolean).join(" · ")}`);
+  }
+  if (rated.length) {
+    md += "| Aspect | Self-rating (1–5) |\n|---|---|\n";
+    for (const [k, v] of rated) md += `| ${LABELS[k] || k} | ${v} |\n`;
+    md += "\n";
+  }
+  if ((r.styleTags || []).length) md += P(`**Playing style this match:** ${r.styleTags.join(", ")}`);
+  if ((r.strengths || []).length) md += P(`**What worked:** ${r.strengths.join(", ")}`);
+  if ((r.weaknesses || []).length) md += P(`**To improve:** ${r.weaknesses.join(", ")}`);
+  if (r.focusNext?.trim()) md += P(`**Focus for next match:** ${r.focusNext.trim()}`);
+  md += P("_Note for AI critique: compare these self-ratings against the objective rally data above — flag any gaps between perception and reality._");
+  return md;
 };
 
 const rawDataBlock = (match) => {

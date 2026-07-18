@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useMatchStore } from "../store/useMatchStore.js";
 import { PLAYER_STYLES } from "../lib/rally.js";
+import { MATCH_TYPES, MATCH_FORMATS } from "../constants/reflection.js";
 import { Screen, TopBar, Badge, Field, Select, BigBtn, Card } from "../components/ui.jsx";
 
 export default function Setup({ setScreen }) {
@@ -13,6 +14,8 @@ export default function Setup({ setScreen }) {
     opponent: "",
     tournament: "",
     playerStyle: "Unknown",
+    matchType: "Club casual",
+    format: "Singles",
   });
 
   const canStart = !!form.opponent;
@@ -29,6 +32,18 @@ export default function Setup({ setScreen }) {
 
         <Field label="Date" value={form.date} onChange={(v) => setForm({ ...form, date: v })} type="date" />
         <Field label="Opponent" value={form.opponent} onChange={(v) => setForm({ ...form, opponent: v })} placeholder="Name or initials" />
+        <Select
+          label="Match type"
+          value={form.matchType}
+          onChange={(v) => setForm({ ...form, matchType: v })}
+          options={MATCH_TYPES}
+        />
+        <Select
+          label="Format"
+          value={form.format}
+          onChange={(v) => setForm({ ...form, format: v })}
+          options={MATCH_FORMATS}
+        />
         <Field label="Tournament / Stage" value={form.tournament} onChange={(v) => setForm({ ...form, tournament: v })} placeholder="e.g. State U13 QF" />
         <Select
           label="Opponent style"

@@ -127,6 +127,9 @@ export default function Home({ setScreen }) {
             Match history
             <span className="ml-2 font-mono text-emerald-400 text-xs">({n})</span>
           </BigBtn>
+          <BigBtn tone="violet" onClick={() => setScreen("reflectionTrends")}>
+            📝 Reflection trends
+          </BigBtn>
           <BigBtn tone="violet" onClick={() => setScreen("patterns")}>
             Patterns & tactical intelligence
           </BigBtn>

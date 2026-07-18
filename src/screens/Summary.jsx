@@ -8,12 +8,14 @@ import {
   slugify,
 } from "../lib/markdown.js";
 import { evaluateGoal, goalLabel, findMetric } from "../lib/goals.js";
+import { hasReflection } from "../constants/reflection.js";
 
 export default function Summary({ setScreen }) {
   const matches = useMatchStore((s) => s.matches);
   const playerName = useMatchStore((s) => s.settings?.playerName) || "Player";
   const updateMatchAiInsights = useMatchStore((s) => s.updateMatchAiInsights);
   const goals = useMatchStore((s) => s.goals) || [];
+  const openReflection = useMatchStore((s) => s.openReflection);
   const m = matches[matches.length - 1];
 
   // Hook state must stay unconditional — tracked before any early return.
@@ -87,6 +89,51 @@ export default function Summary({ setScreen }) {
           <Stat label="Clutch won" value={`${cw}/${cl.length}`} tone={cw >= cl.length / 2 ? "good" : "bad"} />
         </div>
       )}
+
+      {/* Mode 2 — player reflection CTA. Sits right after the stats so it's
+          the natural next tap once the match ends. */}
+      <Card tone={hasReflection(m) ? "default" : "accent"} className="mb-3 mt-1">
+        <SectionLabel>📝 Player reflection</SectionLabel>
+        {hasReflection(m) ? (
+          <>
+            <div className="flex flex-wrap gap-1.5 mb-2">
+              {(m.reflection.styleTags || []).map((t) => (
+                <span key={t} className="px-2 py-0.5 rounded-full bg-emerald-950/60 border border-emerald-800 text-emerald-300 text-[10px] font-semibold">{t}</span>
+              ))}
+            </div>
+            <div className="text-[11px] text-neutral-400 leading-relaxed">
+              {(m.reflection.strengths || []).length > 0 && (
+                <>Worked: <span className="text-emerald-300 font-semibold">{m.reflection.strengths.join(", ")}</span>. </>
+              )}
+              {(m.reflection.weaknesses || []).length > 0 && (
+                <>Improve: <span className="text-red-300 font-semibold">{m.reflection.weaknesses.join(", ")}</span>.</>
+              )}
+              {m.reflection.focusNext?.trim() && (
+                <div className="mt-1 text-neutral-300">Next: "{m.reflection.focusNext}"</div>
+              )}
+            </div>
+            <button
+              onClick={() => { openReflection(m.id, "summary"); setScreen("reflection"); }}
+              className="mt-2 w-full py-2 rounded-lg bg-neutral-800 hover:bg-neutral-700 border border-neutral-700 text-neutral-200 font-bold text-xs active:scale-95"
+            >
+              ✎ Edit reflection
+            </button>
+          </>
+        ) : (
+          <>
+            <p className="text-[11px] text-neutral-400 leading-relaxed mb-2">
+              2 minutes of taps while the match is fresh — net spin, pace variation,
+              defense reaction, style, strengths & weaknesses. Feeds the trends view.
+            </p>
+            <button
+              onClick={() => { openReflection(m.id, "summary"); setScreen("reflection"); }}
+              className="w-full py-2.5 rounded-lg bg-emerald-700 hover:bg-emerald-600 text-white font-bold text-sm active:scale-95"
+            >
+              Add reflection →
+            </button>
+          </>
+        )}
+      </Card>
 
       {/* Goal evaluation — green/red per goal vs this match's rallies */}
       {goals.length > 0 && (
