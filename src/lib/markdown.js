@@ -68,7 +68,9 @@ export const matchAnalysisMarkdown = (match, { playerName = "Player" } = {}) => 
   if (!match) return "";
   const rallies = match.rallies || [];
   const setsWon = (match.sets || []).filter((s) => s.sonScore > s.oppScore).length;
-  const matchWon = setsWon > (match.sets?.length || 0) / 2;
+  const matchWon = match.quickLog && match.resultLabel
+    ? match.resultLabel === "won"
+    : setsWon > (match.sets?.length || 0) / 2;
 
   let md = "";
   md += H1(`🏸 Match analysis — ${playerName} vs ${match.opponent || "Unknown"}`);

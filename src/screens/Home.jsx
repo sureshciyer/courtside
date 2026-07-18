@@ -113,6 +113,9 @@ export default function Home({ setScreen }) {
         </div>
       )}
 
+      <BigBtn tone="secondary" onClick={() => setScreen("quickLog")}>
+        📝 Quick log (reflection only)
+      </BigBtn>
       <BigBtn tone="primary" onClick={() => setScreen("setup")}>
         New match
         {(activeLive || pausedMatches.length > 0) && (

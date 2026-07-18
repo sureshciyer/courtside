@@ -75,7 +75,11 @@ export default function History({ setScreen }) {
           const w = m.rallies.filter((r) => r.pointWonBy === "S").length;
           const l = m.rallies.filter((r) => r.pointWonBy === "O").length;
           const setWins = m.sets.filter((s) => s.sonScore > s.oppScore).length;
-          const matchWon = setWins > m.sets.length / 2;
+          // Quick-logged matches may carry no real scores — trust resultLabel.
+          const matchWon = m.quickLog && m.resultLabel
+            ? m.resultLabel === "won"
+            : setWins > m.sets.length / 2;
+          const unscored = m.quickLog && !m.resultLabel && m.rallies.length === 0;
           const hasInsights = !!(m.aiInsights && m.aiInsights.trim());
           const reflected = hasReflection(m);
           return (
@@ -89,8 +93,11 @@ export default function History({ setScreen }) {
                   </div>
                   <div className="text-[11px] text-neutral-500 font-mono">{m.id} · {m.date}</div>
                 </div>
-                <Badge tone={matchWon ? "default" : "danger"}>{matchWon ? "WON" : "LOST"}</Badge>
+                <Badge tone={unscored ? "muted" : matchWon ? "default" : "danger"}>
+                  {unscored ? "LOGGED" : matchWon ? "WON" : "LOST"}
+                </Badge>
               </div>
+              {!m.quickLog && (
               <div className="font-mono text-sm text-neutral-300">
                 {m.sets.map((s, i) => (
                   <span key={i} className={`mr-3 ${s.sonScore > s.oppScore ? "text-emerald-300" : "text-red-300"}`}>
@@ -99,6 +106,10 @@ export default function History({ setScreen }) {
                 ))}
                 <span className="text-neutral-500">({w}W · {l}L)</span>
               </div>
+              )}
+              {m.quickLog && (
+                <div className="text-[11px] text-neutral-500 italic">Quick log — no rally data</div>
+              )}
               {m.tournament && <div className="text-[11px] text-neutral-500 mt-1">{m.tournament}</div>}
               {(m.matchType || m.format) && (
                 <div className="text-[11px] text-neutral-500 mt-0.5">

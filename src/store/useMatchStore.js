@@ -112,6 +112,37 @@ export const useMatchStore = create(
       updateSettings: (patch) =>
         set((state) => ({ settings: { ...state.settings, ...patch } })),
 
+      // Create a completed match WITHOUT any rally capture — used by the
+      // Quick log flow so a reflection can be attached to casual sessions
+      // where nobody notated shots. `meta.sets` is optional; when absent we
+      // store a neutral 0-0 set and rely on `resultLabel` for the W/L badge.
+      addQuickMatch: (meta) => {
+        const counter = (get().matchCounter || 0) + 1;
+        const id = makeMatchId(counter);
+        const sets = meta.sets?.length ? meta.sets : [{ sonScore: 0, oppScore: 0 }];
+        const match = {
+          ...initMatch(),
+          id,
+          date: meta.date || new Date().toISOString().split("T")[0],
+          opponent: meta.opponent || "Club session",
+          tournament: meta.tournament || "",
+          matchType: meta.matchType || "Club casual",
+          format: meta.format || "Singles",
+          sets,
+          currentSet: sets.length - 1,
+          completed: true,
+          quickLog: true,
+          // "won" | "lost" | null — display hint when no real scores exist.
+          resultLabel: meta.resultLabel || null,
+        };
+        set((state) => ({
+          matchCounter: counter,
+          matches: [...state.matches, match],
+        }));
+        get().ensureOpponent(match.opponent);
+        return id;
+      },
+
       // ---------- Mode 2: post-match reflection ----------
       // Which match the Reflection screen should edit, and where to return
       // after save/back. Transient UI state — intentionally NOT persisted
