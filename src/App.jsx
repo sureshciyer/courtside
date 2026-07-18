@@ -12,6 +12,7 @@ import SettingsScreen from "./screens/Settings.jsx";
 import Scouting from "./screens/Scouting.jsx";
 import Reflection from "./screens/Reflection.jsx";
 import ReflectionTrends from "./screens/ReflectionTrends.jsx";
+import QuickLog from "./screens/QuickLog.jsx";
 
 const SCREENS = {
   home: Home,
@@ -26,6 +27,7 @@ const SCREENS = {
   scouting: Scouting,
   reflection: Reflection,
   reflectionTrends: ReflectionTrends,
+  quickLog: QuickLog,
   settings: SettingsScreen,
 };
 
