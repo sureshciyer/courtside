@@ -89,22 +89,34 @@ function MiniRating({ label, value, onChange }) {
 export default function Setup({ setScreen }) {
   const newMatchId = useMatchStore((s) => s.newMatchId);
   const startMatch = useMatchStore((s) => s.startMatch);
+  const savePlannedMatch = useMatchStore((s) => s.savePlannedMatch);
+  const updatePlannedMatch = useMatchStore((s) => s.updatePlannedMatch);
+  const startPlannedMatch = useMatchStore((s) => s.startPlannedMatch);
+  const openPlannedEdit = useMatchStore((s) => s.openPlannedEdit);
+  const plannedEditId = useMatchStore((s) => s.plannedEditId);
+  const plannedMatches = useMatchStore((s) => s.plannedMatches) || [];
   const opponents = useMatchStore((s) => s.opponents) || {};
-  const nextId = newMatchId();
 
-  const [form, setForm] = useState({
-    date: new Date().toISOString().split("T")[0],
-    opponent: "",
-    tournament: "",
-    playerStyle: "Unknown",
-    matchType: "Casual Game",
-    club: "",
-    format: "Singles",
-  });
-  const [pre, setPre] = useState(() => emptyPreMatch());
+  // Edit mode: Setup is re-opened on an already-prepared (planned) match.
+  const editing = plannedEditId ? plannedMatches.find((m) => m.id === plannedEditId) : null;
+  const displayId = editing ? editing.id : newMatchId();
+
+  const [form, setForm] = useState(() => ({
+    date: editing?.date || new Date().toISOString().split("T")[0],
+    opponent: editing?.opponent || "",
+    tournament: editing?.tournament || "",
+    playerStyle: editing?.playerStyle || "Unknown",
+    matchType: editing?.matchType || "Casual Game",
+    club: editing?.club || "",
+    format: editing?.format || "Singles",
+  }));
+  const [pre, setPre] = useState(() => ({ ...emptyPreMatch(), ...(editing?.preMatch || {}) }));
 
   const isTournament = form.matchType === "Tournament";
   const canStart = !!form.opponent;
+
+  // Clear the edit target when leaving so a later "New match" starts fresh.
+  const leave = (screen) => { openPlannedEdit(null); setScreen(screen); };
 
   // Show any existing scouting notes for this opponent as a reference while
   // writing the game plan (doesn't auto-fill — the plan is the player's own).
@@ -120,29 +132,52 @@ export default function Setup({ setScreen }) {
         : [...p.controllables, opt],
     }));
 
-  const handleStart = () => {
-    // Attach a pre-match plan only for tournaments, and only if something
-    // was filled — keeps casual matches clean.
+  // Attach a pre-match plan only for tournaments, and only if something was
+  // filled — keeps casual matches clean.
+  const buildSetup = () => {
     const anyPre = isTournament && (
       pre.gamePlan.trim() || pre.controllables.length || pre.planB.trim() ||
       pre.focusWord.trim() || pre.confidence != null || pre.nerves != null ||
       pre.bodyReadiness != null || pre.bodyNote.trim()
     );
-    const setup = anyPre
-      ? { ...form, preMatch: { ...pre, createdAt: Date.now() } }
-      : form;
-    startMatch(setup);
-    setScreen("capture");
+    return anyPre
+      ? { ...form, preMatch: { ...pre, createdAt: editing?.preMatch?.createdAt || Date.now() } }
+      : { ...form, preMatch: undefined };
+  };
+
+  // Start capturing now. In edit mode, promote the existing planned match
+  // (after saving any tweaks); otherwise create a fresh live match.
+  const handleStart = () => {
+    if (editing) {
+      updatePlannedMatch(editing.id, buildSetup());
+      startPlannedMatch(editing.id);
+    } else {
+      startMatch(buildSetup());
+    }
+    leave("capture");
+  };
+
+  // Save the prep for later without starting the match.
+  const handleSavePlan = () => {
+    if (editing) updatePlannedMatch(editing.id, buildSetup());
+    else savePlannedMatch(buildSetup());
+    leave("home");
   };
 
   return (
     <Screen>
-      <TopBar title="New match" subtitle="Capture opponent context up front" onBack={() => setScreen("home")} />
+      <TopBar
+        title={editing ? "Edit pre-match prep" : "New match"}
+        subtitle={editing ? "Prepared match — start it on match day" : "Capture opponent context up front"}
+        onBack={() => leave("home")}
+      />
 
       <Card className="mb-3">
         <div className="flex items-center justify-between mb-4">
-          <Badge>{nextId}</Badge>
-          <span className="text-[10px] uppercase tracking-wider text-neutral-500">Match ID</span>
+          <Badge>{displayId}</Badge>
+          <span className="text-[10px] uppercase tracking-wider text-neutral-500">
+            {editing ? "Prepared match" : "Match ID"}
+          </span>
         </div>
 
         <Field label="Date" value={form.date} onChange={(v) => setForm({ ...form, date: v })} type="date" />
@@ -258,8 +293,16 @@ export default function Setup({ setScreen }) {
       <BigBtn tone="primary" disabled={!canStart} onClick={handleStart}>
         Start match →
       </BigBtn>
+      <BigBtn tone="secondary" disabled={!canStart} onClick={handleSavePlan}>
+        {editing ? "💾 Save prep" : "🗓 Save prep — start match later"}
+      </BigBtn>
       {!canStart && (
         <p className="text-[11px] text-center text-amber-400/80 mt-1">Opponent name is required</p>
+      )}
+      {canStart && !editing && (
+        <p className="text-[11px] text-center text-neutral-500 mt-1 leading-relaxed">
+          "Save prep" shelves this match with its plan — you can start capturing on match day from the home screen.
+        </p>
       )}
     </Screen>
   );

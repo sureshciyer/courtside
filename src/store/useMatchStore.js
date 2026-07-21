@@ -79,6 +79,7 @@ export const useMatchStore = create(
       currentMatch: null,    // the live match being captured (or null)
       currentRally: null,    // the rally being built inside currentMatch
       pausedMatches: [],     // in-progress matches stashed for later
+      plannedMatches: [],    // prepared-but-not-started matches (pre-match prep done ahead of time)
       matchCounter: 0,       // monotonic — last id issued
 
       // Opponent profiles, keyed by normalized opponent name. Profile shape:
@@ -248,6 +249,74 @@ export const useMatchStore = create(
           const next = { ...state.opponents };
           delete next[key];
           return { opponents: next };
+        });
+      },
+
+      // ---------- planned (prepared-ahead) matches ----------
+      // Pranav fills the pre-match plan a day / hours before a tournament
+      // match. savePlannedMatch parks it WITHOUT starting capture; on match
+      // day startPlannedMatch promotes it into the live slot.
+
+      // Which planned match the Setup screen is editing (transient, not persisted).
+      plannedEditId: null,
+      openPlannedEdit: (id) => set({ plannedEditId: id }),
+
+      // Create a prepared match and shelve it — does not touch currentMatch.
+      savePlannedMatch: (setup) => {
+        const counter = (get().matchCounter || 0) + 1;
+        const id = makeMatchId(counter);
+        const match = {
+          ...initMatch(),
+          id,
+          ...setup,
+          completed: false,
+          planned: true,
+          plannedAt: Date.now(),
+        };
+        set((state) => ({
+          matchCounter: counter,
+          plannedMatches: [...state.plannedMatches, match],
+        }));
+        get().ensureOpponent(setup.opponent);
+        return id;
+      },
+
+      // Edit a shelved plan's meta / preMatch before the match is played.
+      updatePlannedMatch: (id, patch) => {
+        set((state) => ({
+          plannedMatches: state.plannedMatches.map((m) =>
+            m.id === id ? { ...m, ...patch } : m
+          ),
+        }));
+        if (patch.opponent) get().ensureOpponent(patch.opponent);
+      },
+
+      discardPlannedMatch: (id) =>
+        set((state) => ({
+          plannedMatches: state.plannedMatches.filter((m) => m.id !== id),
+        })),
+
+      // Promote a planned match into live capture. Strips the planned flags,
+      // seeds a fresh rally at the current set's score, and auto-parks any
+      // match already being captured so nothing is lost.
+      startPlannedMatch: (id) => {
+        set((state) => {
+          const idx = state.plannedMatches.findIndex((m) => m.id === id);
+          if (idx < 0) return {};
+          // Strip the planned-only markers as it becomes a live match.
+          const { planned: _planned, plannedAt: _plannedAt, ...match } = state.plannedMatches[idx];
+          const setIdx = match.currentSet ?? 0;
+          const curSet = match.sets?.[setIdx] || { sonScore: 0, oppScore: 0 };
+          const rally = initRally(match.id, setIdx, curSet.sonScore, curSet.oppScore);
+          const parked = state.currentMatch && !state.currentMatch.completed
+            ? [...state.pausedMatches, packMatch(state.currentMatch, state.currentRally)]
+            : state.pausedMatches;
+          return {
+            currentMatch: { ...match, completed: false },
+            currentRally: rally,
+            pausedMatches: parked,
+            plannedMatches: state.plannedMatches.filter((_, i) => i !== idx),
+          };
         });
       },
 
@@ -599,6 +668,7 @@ export const useMatchStore = create(
           currentMatch: data?.currentMatch ?? null,
           currentRally: data?.currentRally ?? null,
           pausedMatches: data?.pausedMatches ?? [],
+          plannedMatches: data?.plannedMatches ?? [],
           matchCounter: data?.matchCounter ?? (data?.matches?.length || 0),
           opponents: data?.opponents ?? {},
         }),
@@ -658,6 +728,7 @@ export const useMatchStore = create(
         currentMatch: state.currentMatch,
         currentRally: state.currentRally,
         pausedMatches: state.pausedMatches,
+        plannedMatches: state.plannedMatches,
         matchCounter: state.matchCounter,
         opponents: state.opponents,
         settings: state.settings,
@@ -672,6 +743,7 @@ export const useMatchStore = create(
         ...persisted,
         settings: { ...current.settings, ...(persisted?.settings || {}) },
         pausedMatches: persisted?.pausedMatches || current.pausedMatches || [],
+        plannedMatches: persisted?.plannedMatches || current.plannedMatches || [],
         opponents: { ...(current.opponents || {}), ...(persisted?.opponents || {}) },
         syncStatus: { ...(current.syncStatus || {}), ...(persisted?.syncStatus || {}) },
         goals: persisted?.goals || current.goals || [],

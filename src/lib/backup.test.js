@@ -39,6 +39,46 @@ describe("makeBackup", () => {
   });
 });
 
+describe("planned (prepared) matches in backup", () => {
+  it("makeBackup carries plannedMatches in the envelope", () => {
+    const planned = match({ id: "M005", completed: false, planned: true });
+    const out = makeBackup({
+      matches: [], pausedMatches: [], plannedMatches: [planned],
+      currentMatch: null, currentRally: null, matchCounter: 5, opponents: {},
+      settings: { playerName: "Pranav" },
+    });
+    expect(out.plannedMatches).toHaveLength(1);
+    expect(out.plannedMatches[0].id).toBe("M005");
+  });
+
+  it("mergeBackup unions planned matches by id and reports addedPlanned", () => {
+    const local = {
+      matches: [], pausedMatches: [], opponents: {}, matchCounter: 5,
+      plannedMatches: [match({ id: "M005", planned: true })],
+    };
+    const incoming = {
+      matches: [], pausedMatches: [], opponents: {},
+      plannedMatches: [
+        match({ id: "M005", planned: true }), // dup — skipped
+        match({ id: "M006", planned: true }), // new — added
+      ],
+    };
+    const { patch, stats } = mergeBackup(local, incoming);
+    expect(stats.addedPlanned).toBe(1);
+    expect(patch.plannedMatches.map((m) => m.id)).toEqual(["M005", "M006"]);
+  });
+
+  it("does not drop local planned matches absent from the backup", () => {
+    const local = {
+      matches: [], pausedMatches: [], opponents: {}, matchCounter: 3,
+      plannedMatches: [match({ id: "M003", planned: true })],
+    };
+    const incoming = { matches: [], pausedMatches: [], opponents: {}, plannedMatches: [] };
+    const { patch } = mergeBackup(local, incoming);
+    expect(patch.plannedMatches.map((m) => m.id)).toEqual(["M003"]);
+  });
+});
+
 // mergeBackup: live-match handling. Three outcomes — restored / parked / skipped.
 
 describe("mergeBackup live-match handling", () => {

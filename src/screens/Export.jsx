@@ -13,6 +13,7 @@ import { syncWithDrive, hasValidToken } from "../lib/driveSync.js";
 export default function Export({ setScreen }) {
   const matches = useMatchStore((s) => s.matches);
   const pausedMatches = useMatchStore((s) => s.pausedMatches) || [];
+  const plannedMatches = useMatchStore((s) => s.plannedMatches) || [];
   const opponents = useMatchStore((s) => s.opponents) || {};
   const matchCounter = useMatchStore((s) => s.matchCounter) || 0;
   const settings = useMatchStore((s) => s.settings);
@@ -34,7 +35,7 @@ export default function Export({ setScreen }) {
   // doesn't silently drop the live match. makeBackup tolerates nulls.
   const buildBackup = () =>
     makeBackup({
-      matches, pausedMatches, opponents, matchCounter, settings,
+      matches, pausedMatches, plannedMatches, opponents, matchCounter, settings,
       currentMatch, currentRally,
     });
   const backupJson = () => JSON.stringify(buildBackup(), null, 2);
@@ -67,6 +68,7 @@ export default function Export({ setScreen }) {
           const current = {
             matches: st.matches,
             pausedMatches: st.pausedMatches,
+            plannedMatches: st.plannedMatches,
             opponents: st.opponents,
             matchCounter: st.matchCounter,
             currentMatch: st.currentMatch,
@@ -123,7 +125,7 @@ export default function Export({ setScreen }) {
         reset();
         return;
       }
-      const current = { matches, pausedMatches, opponents, matchCounter };
+      const current = { matches, pausedMatches, plannedMatches, opponents, matchCounter };
       const { stats } = mergeBackup(current, data);
       setImportState({ phase: "preview", preview: stats, incoming: data, error: null, warning });
       reset();
@@ -136,7 +138,7 @@ export default function Export({ setScreen }) {
 
   const confirmImport = () => {
     if (!importState.incoming) return;
-    const current = { matches, pausedMatches, opponents, matchCounter };
+    const current = { matches, pausedMatches, plannedMatches, opponents, matchCounter };
     const { patch, stats } = mergeBackup(current, importState.incoming);
     applyBackupMerge(patch, stats);
     setImportState({ phase: "done", preview: stats, incoming: null, error: null, warning: null });
@@ -329,6 +331,9 @@ export default function Export({ setScreen }) {
             <PreviewRow label="Matches to add" value={importState.preview.addedMatches} />
             <PreviewRow label="Matches skipped (duplicate IDs)" value={importState.preview.skippedMatches} tone={importState.preview.skippedMatches > 0 ? "warn" : "default"} />
             <PreviewRow label="Paused matches to add" value={importState.preview.addedPaused} />
+            {importState.preview.addedPlanned > 0 && (
+              <PreviewRow label="Prepared matches to add" value={importState.preview.addedPlanned} />
+            )}
             <PreviewRow label="New opponent profiles" value={importState.preview.addedOpponentProfiles} />
             <PreviewRow label="Existing profiles to fill empty fields" value={importState.preview.filledOpponentFields} />
             {importState.preview.liveOutcome && importState.preview.liveOutcome !== "none" && (

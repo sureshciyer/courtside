@@ -5,8 +5,12 @@ export default function Home({ setScreen }) {
   const matches = useMatchStore((s) => s.matches);
   const currentMatch = useMatchStore((s) => s.currentMatch);
   const pausedMatches = useMatchStore((s) => s.pausedMatches);
+  const plannedMatches = useMatchStore((s) => s.plannedMatches) || [];
   const resumeMatch = useMatchStore((s) => s.resumeMatch);
   const discardPausedMatch = useMatchStore((s) => s.discardPausedMatch);
+  const startPlannedMatch = useMatchStore((s) => s.startPlannedMatch);
+  const discardPlannedMatch = useMatchStore((s) => s.discardPlannedMatch);
+  const openPlannedEdit = useMatchStore((s) => s.openPlannedEdit);
   const pauseCurrentMatch = useMatchStore((s) => s.pauseCurrentMatch);
 
   const totalRallies = matches.reduce((a, m) => a + m.rallies.length, 0);
@@ -24,6 +28,24 @@ export default function Home({ setScreen }) {
       `${m.rallies.length} captured rall${m.rallies.length !== 1 ? "ies" : "y"} will be lost. This cannot be undone.`
     );
     if (ok) discardPausedMatch(m.id);
+  };
+
+  const handleStartPlanned = (id) => {
+    startPlannedMatch(id);
+    setScreen("capture");
+  };
+
+  const handleEditPlanned = (id) => {
+    openPlannedEdit(id);
+    setScreen("setup");
+  };
+
+  const handleDiscardPlanned = (m) => {
+    const ok = window.confirm(
+      `Discard prepared match vs ${m.opponent || "(no opponent)"}?\n\n` +
+      `The pre-match plan will be lost. This cannot be undone.`
+    );
+    if (ok) discardPlannedMatch(m.id);
   };
 
   return (
@@ -109,6 +131,53 @@ export default function Home({ setScreen }) {
                 </Card>
               );
             })}
+          </div>
+        </div>
+      )}
+
+      {/* Prepared matches — pre-match prep done ahead of time, not yet played */}
+      {plannedMatches.length > 0 && (
+        <div className="mb-2">
+          <div className="text-[10px] uppercase tracking-[0.2em] text-sky-400 font-semibold mb-1.5 mt-1 px-1">
+            Prepared · {plannedMatches.length}
+          </div>
+          <div className="flex flex-col gap-1.5 mb-2">
+            {plannedMatches.map((m) => (
+              <Card key={m.id} tone="accent" className="!p-3">
+                <div className="flex items-center justify-between gap-3">
+                  <div className="min-w-0">
+                    <div className="font-bold text-white truncate">vs {m.opponent || "(no opponent)"}</div>
+                    <div className="text-[11px] text-neutral-400 font-mono">
+                      {m.id} · {[m.matchType, m.format].filter(Boolean).join(" · ")}
+                    </div>
+                    {m.tournament && (
+                      <div className="text-[11px] text-sky-300/80 truncate">{m.tournament}</div>
+                    )}
+                    <div className="text-[10px] text-neutral-500 mt-0.5">🎯 Plan ready · not started</div>
+                  </div>
+                  <div className="flex flex-col gap-1 shrink-0">
+                    <button
+                      onClick={() => handleStartPlanned(m.id)}
+                      className="px-3 py-1.5 rounded-md bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs active:scale-95"
+                    >
+                      Start →
+                    </button>
+                    <button
+                      onClick={() => handleEditPlanned(m.id)}
+                      className="px-3 py-1 rounded-md bg-neutral-800 hover:bg-neutral-700 text-neutral-300 text-[10px] font-semibold border border-neutral-700"
+                    >
+                      Edit prep
+                    </button>
+                    <button
+                      onClick={() => handleDiscardPlanned(m)}
+                      className="px-3 py-1 rounded-md bg-neutral-900 hover:bg-red-950 text-red-400 text-[10px] font-semibold border border-red-900 hover:border-red-700"
+                    >
+                      Discard
+                    </button>
+                  </div>
+                </div>
+              </Card>
+            ))}
           </div>
         </div>
       )}

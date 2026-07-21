@@ -9,7 +9,7 @@
 // so existing local notes / AI insights are never overwritten by an import.
 
 export const BACKUP_SIGNATURE = "courtside";
-export const BACKUP_VERSION = 3;
+export const BACKUP_VERSION = 4;
 
 // Build the envelope from a store-state snapshot.
 export const makeBackup = (state) => ({
@@ -19,6 +19,8 @@ export const makeBackup = (state) => ({
   playerName: state.settings?.playerName || "",
   matches: state.matches || [],
   pausedMatches: state.pausedMatches || [],
+  // Prepared-but-not-started matches (pre-match prep filled ahead of time).
+  plannedMatches: state.plannedMatches || [],
   // The live match being captured right now and its in-progress rally.
   // Included so a download mid-match doesn't silently drop work. Will be
   // null on a fresh export with no live capture in progress.
@@ -73,6 +75,8 @@ export const mergeBackup = (current, incoming) => {
   const incomingMatches = Array.isArray(incoming?.matches) ? incoming.matches : [];
   const currentPaused = current.pausedMatches || [];
   const incomingPaused = Array.isArray(incoming?.pausedMatches) ? incoming.pausedMatches : [];
+  const currentPlanned = current.plannedMatches || [];
+  const incomingPlanned = Array.isArray(incoming?.plannedMatches) ? incoming.plannedMatches : [];
   const currentOpponents = current.opponents || {};
   const incomingOpponents = incoming?.opponents || {};
 
@@ -97,6 +101,16 @@ export const mergeBackup = (current, incoming) => {
     pausedIds.add(m.id);
   }
   const mergedPaused = [...currentPaused, ...addedPaused];
+
+  // --- planned matches: same union-by-id ---
+  const plannedIds = new Set(currentPlanned.map((m) => m.id));
+  const addedPlanned = [];
+  for (const m of incomingPlanned) {
+    if (!m?.id || plannedIds.has(m.id)) continue;
+    addedPlanned.push(m);
+    plannedIds.add(m.id);
+  }
+  const mergedPlanned = [...currentPlanned, ...addedPlanned];
 
   // --- opponents: profile-wise field merge ---
   // For each incoming profile:
@@ -178,6 +192,7 @@ export const mergeBackup = (current, incoming) => {
   const patch = {
     matches: mergedMatches,
     pausedMatches: mergedPaused,
+    plannedMatches: mergedPlanned,
     opponents: mergedOpponents,
     matchCounter: mergedCounter,
   };
@@ -192,6 +207,7 @@ export const mergeBackup = (current, incoming) => {
       addedMatches: addedMatches.length,
       skippedMatches: skippedMatches.length,
       addedPaused: addedPaused.length,
+      addedPlanned: addedPlanned.length,
       addedOpponentProfiles: addedProfiles,
       filledOpponentFields: filledFields,
       totalIncomingMatches: incomingMatches.length,
