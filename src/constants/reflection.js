@@ -114,6 +114,9 @@ export const emptyReflection = () => ({
   strengths: [],
   weaknesses: [],
   focusNext: "",
+  // Pre→post loop: 1–5 self-grade on sticking to the pre-match game plan.
+  // Only meaningful when the match has a preMatch plan (tournaments).
+  stuckToPlan: null,
   // Mental / feelings check (Mode 2 mindset block).
   feelings: [],          // multi-select from FEELING_TAGS
   bigPointMindset: null, // one of BIG_POINT_MINDSETS
@@ -137,6 +140,7 @@ export const hasReflection = (match) => {
     || (r.weaknesses || []).length > 0
     || (r.feelings || []).length > 0
     || r.bigPointMindset != null
+    || r.stuckToPlan != null
     || !!r.selfTalk?.trim()
     || Object.values(r.errorNotes || {}).some((t) => t?.trim())
     || !!r.notes?.trim();

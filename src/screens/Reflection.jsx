@@ -13,6 +13,7 @@ import {
   BIG_POINT_MINDSETS,
   emptyReflection,
 } from "../constants/reflection.js";
+import { hasPreMatch } from "../constants/prematch.js";
 
 // One tappable 1–5 rating row. Big touch targets — this is filled
 // courtside on a phone, often by a 10-year-old.
@@ -192,6 +193,19 @@ function ReflectionPrintView({ match, draft, playerName }) {
       <div className="text-sm mb-1">{contextLine}</div>
       {scoreLine && <div className="text-sm font-mono mb-4">Score: {scoreLine}</div>}
 
+      {hasPreMatch(match) && (
+        <div className="text-sm mb-4 pb-3 border-b">
+          <div className="font-bold mb-1">Pre-match game plan</div>
+          {match.preMatch.gamePlan?.trim() && <p className="mb-1 whitespace-pre-wrap">{match.preMatch.gamePlan.trim()}</p>}
+          {(match.preMatch.controllables || []).length > 0 && (
+            <p className="mb-1"><b>Focus:</b> {match.preMatch.controllables.join(", ")}</p>
+          )}
+          {match.preMatch.planB?.trim() && <p className="mb-1"><b>Plan B:</b> {match.preMatch.planB.trim()}</p>}
+          {match.preMatch.focusWord?.trim() && <p className="mb-1"><b>Focus word:</b> {match.preMatch.focusWord.trim()}</p>}
+          {draft.stuckToPlan != null && <p className="mb-0"><b>Stuck to the plan:</b> {draft.stuckToPlan} / 5</p>}
+        </div>
+      )}
+
       {rated.length > 0 && (
         <table className="w-full text-sm mb-4 border-collapse">
           <thead>
@@ -321,6 +335,37 @@ export default function Reflection({ setScreen }) {
         {playerName}'s own read on the match — 2 minutes, all taps. This feeds the
         Reflection trends view and the Markdown export for AI critique.
       </p>
+
+      {/* Pre→post loop: only when a tournament pre-match plan exists. Shows
+          the plan and asks the player to grade how well they stuck to it. */}
+      {hasPreMatch(match) && (
+        <Card tone="accent" className="mb-3">
+          <SectionLabel>🎯 Your pre-match game plan</SectionLabel>
+          {match.preMatch.gamePlan?.trim() && (
+            <div className="text-sm text-neutral-200 leading-relaxed whitespace-pre-wrap mb-2">
+              {match.preMatch.gamePlan.trim()}
+            </div>
+          )}
+          {(match.preMatch.controllables || []).length > 0 && (
+            <div className="text-[11px] text-neutral-400 mb-1">
+              <span className="text-neutral-500">Focus: </span>{match.preMatch.controllables.join(" · ")}
+            </div>
+          )}
+          {match.preMatch.planB?.trim() && (
+            <div className="text-[11px] text-neutral-400 mb-2">
+              <span className="text-neutral-500">Plan B: </span>{match.preMatch.planB.trim()}
+            </div>
+          )}
+          <div className="pt-2 border-t border-neutral-800">
+            <RatingRow
+              label="Did you stick to your plan?"
+              hint="1 = forgot it completely · 5 = executed it all match"
+              value={draft.stuckToPlan}
+              onChange={(v) => setDraft((d) => ({ ...d, stuckToPlan: v }))}
+            />
+          </div>
+        </Card>
+      )}
 
       <Card className="mb-3">
         <SectionLabel>Rate 1–5 · how did it feel today?</SectionLabel>

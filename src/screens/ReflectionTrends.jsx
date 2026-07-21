@@ -73,6 +73,10 @@ export default function ReflectionTrends({ setScreen }) {
     () => tally(reflected.map((m) => m.reflection?.bigPointMindset).filter(Boolean)),
     [reflected]
   );
+  const stuckToPlanSeries = useMemo(
+    () => reflected.map((m) => m.reflection?.stuckToPlan).filter((v) => v != null),
+    [reflected]
+  );
   const strengthCounts = useMemo(() => tally(reflected.flatMap((m) => m.reflection?.strengths || [])), [reflected]);
   const weaknessCounts = useMemo(() => tally(reflected.flatMap((m) => m.reflection?.weaknesses || [])), [reflected]);
   const focusList = reflected
@@ -152,6 +156,32 @@ export default function ReflectionTrends({ setScreen }) {
                 <MeterRow key={tag} label={tag} value={n} total={reflected.length} tone="emerald" />
               ))}
               <p className="text-[10px] text-neutral-600 mt-1">Share of reflected matches carrying each tag.</p>
+            </Card>
+          )}
+
+          {stuckToPlanSeries.length > 0 && (
+            <Card className="mb-3">
+              <SectionLabel>Game-plan discipline</SectionLabel>
+              <div className="flex items-center justify-between gap-3">
+                <div className="min-w-0">
+                  <div className="text-sm font-bold text-neutral-100">Stuck to the pre-match plan</div>
+                  <div className="text-[10px] text-neutral-500">
+                    {stuckToPlanSeries.length} graded match{stuckToPlanSeries.length !== 1 ? "es" : ""}
+                    {(() => {
+                      const d = trendDelta(stuckToPlanSeries);
+                      return d != null ? (
+                        <span className={d > 0.15 ? " text-emerald-400" : d < -0.15 ? " text-red-400" : " text-neutral-500"}>
+                          {" "}· {d > 0.15 ? "↑ improving" : d < -0.15 ? "↓ slipping" : "→ steady"}
+                        </span>
+                      ) : null;
+                    })()}
+                  </div>
+                </div>
+                <Sparkline points={stuckToPlanSeries} />
+              </div>
+              <p className="text-[10px] text-neutral-600 mt-2">
+                How well the game plan was executed, oldest → newest. Only tournament matches with a pre-match plan appear here.
+              </p>
             </Card>
           )}
 

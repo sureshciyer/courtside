@@ -2,6 +2,7 @@ import { useState } from "react";
 import { useMatchStore } from "../store/useMatchStore.js";
 import { Screen, TopBar, Card, Badge } from "../components/ui.jsx";
 import { hasReflection } from "../constants/reflection.js";
+import { hasPreMatch } from "../constants/prematch.js";
 import {
   matchAnalysisMarkdown,
   copyMarkdown,
@@ -90,6 +91,7 @@ export default function History({ setScreen }) {
                   <div className="flex items-center gap-2 flex-wrap">
                     <span className="font-bold text-white truncate">vs {m.opponent}</span>
                     {hasInsights && <Badge tone="muted">🧠</Badge>}
+                    {hasPreMatch(m) && <Badge tone="muted">🎯</Badge>}
                     {reflected && <Badge tone="muted">📝</Badge>}
                   </div>
                   <div className="text-[11px] text-neutral-500 font-mono">{m.id} · {m.date}</div>

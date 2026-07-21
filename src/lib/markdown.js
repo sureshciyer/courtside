@@ -6,6 +6,7 @@
 
 import { reportBundle, setAggregate, pct, winningSequences } from "./analytics.js";
 import { SHOT_NAMES, ZONE_LABELS } from "../constants/badminton.js";
+import { hasPreMatch } from "../constants/prematch.js";
 
 // Local helper — tally landing zones for shots tagged with a given quality.
 // Used by Patterns Markdown so the "Effective-tagged" heatmap mirrors the
@@ -88,6 +89,7 @@ export const matchAnalysisMarkdown = (match, { playerName = "Player" } = {}) => 
   if (!rallies.length) {
     md += H2("No rally data captured");
     md += P("_This match was ended without any shot-level data._");
+    md += preMatchMarkdown(match);
     md += reflectionMarkdown(match);
     md += rawDataBlock(match);
     return md;
@@ -238,7 +240,8 @@ export const matchAnalysisMarkdown = (match, { playerName = "Player" } = {}) => 
   // Improvement trends
   md += improvementTrendsMarkdown(bundle.trends);
 
-  // Player reflection (Mode 2) — subjective self-assessment, if captured.
+  // Pre-match plan (Mode 3) + post-match reflection (Mode 2).
+  md += preMatchMarkdown(match);
   md += reflectionMarkdown(match);
 
   // AI critique
@@ -856,6 +859,30 @@ const deriveOpponentTraps = (bundle) => {
   }
 
   return traps;
+};
+
+// Renders the Mode 3 pre-match plan (tournaments) plus the post-match
+// self-grade on sticking to it, so LLM critique and the coach can judge
+// intention vs execution. Returns "" when no plan was set.
+const preMatchMarkdown = (match) => {
+  if (!hasPreMatch(match)) return "";
+  const p = match.preMatch;
+  let md = H2("🎯 Pre-match plan");
+  if (p.gamePlan?.trim()) md += P(`**Game plan:** ${p.gamePlan.trim()}`);
+  if ((p.controllables || []).length) md += P(`**Controllables (process goals):** ${p.controllables.join(", ")}`);
+  if (p.planB?.trim()) md += P(`**Plan B:** ${p.planB.trim()}`);
+  if (p.focusWord?.trim()) md += P(`**Focus word:** ${p.focusWord.trim()}`);
+  const arousal = [
+    p.confidence != null ? `confidence ${p.confidence}/5` : null,
+    p.nerves != null ? `nerves ${p.nerves}/5` : null,
+  ].filter(Boolean).join(" · ");
+  if (arousal) md += P(`**Pre-match state:** ${arousal}`);
+  const body = [p.bodyReadiness, p.bodyNote?.trim()].filter(Boolean).join(" — ");
+  if (body) md += P(`**Body check:** ${body}`);
+  if (match.reflection?.stuckToPlan != null) {
+    md += P(`**Stuck to the plan (self-grade):** ${match.reflection.stuckToPlan}/5`);
+  }
+  return md;
 };
 
 // Renders the Mode 2 post-match reflection as a Markdown section so LLM
