@@ -61,7 +61,7 @@ export default function Patterns({ setScreen }) {
       <TopBar
         title="Patterns"
         subtitle={`${matchCount} match${matchCount !== 1 ? "es" : ""} · ${rallies.length} rallies`}
-        onBack={() => setScreen("home")}
+        onBack={() => setScreen("insights")}
       />
 
       {mdFlash && (

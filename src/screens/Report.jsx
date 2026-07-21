@@ -96,7 +96,7 @@ export default function Report({ setScreen }) {
   if (allMatches.length === 0) {
     return (
       <Screen>
-        <TopBar title="Performance report" onBack={() => setScreen("home")} />
+        <TopBar title="Performance report" onBack={() => setScreen("insights")} />
         <Card className="text-center py-10">
           <div className="text-4xl mb-2">📋</div>
           <div className="font-bold text-white mb-1">No match data yet</div>
@@ -145,7 +145,7 @@ export default function Report({ setScreen }) {
       <TopBar
         title="Performance report"
         subtitle={`${playerName} · ${scopeLabel} · ${matches.length} match${matches.length !== 1 ? "es" : ""} · ${agg.rallies} rallies`}
-        onBack={() => setScreen("home")}
+        onBack={() => setScreen("insights")}
         right={<PrintBtn onClick={printReport} />}
       />
 

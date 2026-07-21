@@ -13,6 +13,8 @@ import Scouting from "./screens/Scouting.jsx";
 import Reflection from "./screens/Reflection.jsx";
 import ReflectionTrends from "./screens/ReflectionTrends.jsx";
 import QuickLog from "./screens/QuickLog.jsx";
+import Insights from "./screens/Insights.jsx";
+import EditMatch from "./screens/EditMatch.jsx";
 
 const SCREENS = {
   home: Home,
@@ -28,6 +30,8 @@ const SCREENS = {
   reflection: Reflection,
   reflectionTrends: ReflectionTrends,
   quickLog: QuickLog,
+  insights: Insights,
+  editMatch: EditMatch,
   settings: SettingsScreen,
 };
 

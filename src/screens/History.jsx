@@ -14,6 +14,7 @@ export default function History({ setScreen }) {
   const playerName = useMatchStore((s) => s.settings?.playerName) || "Player";
   const reopenMatch = useMatchStore((s) => s.reopenMatch);
   const openReflection = useMatchStore((s) => s.openReflection);
+  const openMatchEdit = useMatchStore((s) => s.openMatchEdit);
   const currentMatch = useMatchStore((s) => s.currentMatch);
   const [flash, setFlash] = useState(null);
 
@@ -120,7 +121,7 @@ export default function History({ setScreen }) {
                 <div className="text-[11px] text-amber-300/90 mt-0.5">Opponent style: {m.playerStyle}</div>
               )}
 
-              <div className="flex gap-1.5 mt-2 pt-2 border-t border-neutral-800">
+              <div className="flex flex-wrap gap-1.5 mt-2 pt-2 border-t border-neutral-800">
                 <button
                   onClick={() => handleCopy(m)}
                   className="flex-1 px-2 py-1 rounded-md bg-neutral-800 hover:bg-neutral-700 border border-neutral-700 text-neutral-200 text-[11px] font-semibold active:scale-95"
@@ -142,6 +143,13 @@ export default function History({ setScreen }) {
                   }`}
                 >
                   📝 {reflected ? "Edit" : "Reflect"}
+                </button>
+                <button
+                  onClick={() => { openMatchEdit(m.id); setScreen("editMatch"); }}
+                  className="flex-1 px-2 py-1 rounded-md bg-neutral-900 hover:bg-neutral-800 border border-neutral-700 text-neutral-300 text-[11px] font-semibold active:scale-95"
+                  title="Edit opponent, club, match type, date — and scores for quick logs"
+                >
+                  ✎ Details
                 </button>
                 <button
                   onClick={() => handleReopen(m)}

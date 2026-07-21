@@ -85,7 +85,7 @@ export default function ReflectionTrends({ setScreen }) {
       <TopBar
         title="Reflection trends"
         subtitle={`${reflected.length} reflected match${reflected.length !== 1 ? "es" : ""}`}
-        onBack={() => setScreen("home")}
+        onBack={() => setScreen("insights")}
       />
 
       {/* Match-type filter — the tournament-vs-club comparison this whole

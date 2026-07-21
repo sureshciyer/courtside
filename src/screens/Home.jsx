@@ -130,36 +130,29 @@ export default function Home({ setScreen }) {
             Match history
             <span className="ml-2 font-mono text-emerald-400 text-xs">({n})</span>
           </BigBtn>
-          <BigBtn tone="violet" onClick={() => setScreen("reflectionTrends")}>
-            📝 Reflection trends
-          </BigBtn>
-          <BigBtn tone="violet" onClick={() => setScreen("patterns")}>
-            Patterns & tactical intelligence
-          </BigBtn>
-          <BigBtn tone="info" onClick={() => setScreen("scouting")}>
-            🎯 Scouting dossier
-          </BigBtn>
-          <BigBtn tone="accent" onClick={() => setScreen("report")}>
-            Full performance report
-          </BigBtn>
-          <BigBtn tone="secondary" onClick={() => setScreen("customReport")}>
-            📋 Custom report (selected sections)
+          <BigBtn tone="violet" onClick={() => setScreen("insights")}>
+            📊 Insights & reports
           </BigBtn>
         </>
       )}
-      {/* Backup/Restore is always reachable — a brand-new device needs
-          Restore before any matches exist. */}
-      <BigBtn tone="secondary" onClick={() => setScreen("exportScreen")}>
-        💾 Backup / Restore
-      </BigBtn>
 
       <div className="mt-auto pt-6 text-center flex flex-col items-center gap-2">
-        <button
-          onClick={() => setScreen("settings")}
-          className="text-xs text-neutral-400 hover:text-neutral-200 border border-neutral-800 hover:border-neutral-600 rounded-full px-3 py-1.5 transition"
-        >
-          ⚙ Settings
-        </button>
+        <div className="flex gap-2">
+          <button
+            onClick={() => setScreen("settings")}
+            className="text-xs text-neutral-400 hover:text-neutral-200 border border-neutral-800 hover:border-neutral-600 rounded-full px-3 py-1.5 transition"
+          >
+            ⚙ Settings
+          </button>
+          {/* Backup/Restore stays reachable even with zero matches — a
+              brand-new device needs Restore before any data exists. */}
+          <button
+            onClick={() => setScreen("exportScreen")}
+            className="text-xs text-neutral-400 hover:text-neutral-200 border border-neutral-800 hover:border-neutral-600 rounded-full px-3 py-1.5 transition"
+          >
+            💾 Backup / Restore
+          </button>
+        </div>
         <div className="text-[10px] uppercase tracking-[0.2em] text-neutral-600 font-semibold">
           {n} match{n !== 1 ? "es" : ""} · {totalRallies} rallies stored
         </div>

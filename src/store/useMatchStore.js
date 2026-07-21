@@ -144,6 +144,20 @@ export const useMatchStore = create(
         return id;
       },
 
+      // Edit metadata on a COMPLETED (archived) match — opponent, club,
+      // matchType, format, date, tournament, and for quick-logged matches
+      // also sets/resultLabel. Captured matches keep their scores derived
+      // from rallies (use Reopen for those), so callers should only pass
+      // sets/resultLabel when the match is quickLog.
+      updateArchivedMatch: (matchId, patch) => {
+        set((state) => ({
+          matches: state.matches.map((m) =>
+            m.id === matchId ? { ...m, ...patch } : m
+          ),
+        }));
+        if (patch.opponent) get().ensureOpponent(patch.opponent);
+      },
+
       // ---------- Mode 2: post-match reflection ----------
       // Which match the Reflection screen should edit, and where to return
       // after save/back. Transient UI state — intentionally NOT persisted
@@ -152,6 +166,11 @@ export const useMatchStore = create(
       reflectReturn: "summary",
       openReflection: (matchId, returnScreen = "summary") =>
         set({ reflectTargetId: matchId, reflectReturn: returnScreen }),
+
+      // Which archived match the EditMatch screen should edit. Transient
+      // UI state like reflectTargetId — not persisted.
+      editTargetId: null,
+      openMatchEdit: (matchId) => set({ editTargetId: matchId }),
 
       // Attach/update the structured reflection on a completed match.
       saveReflection: (matchId, reflection) =>

@@ -44,7 +44,7 @@ export default function Scouting({ setScreen }) {
     <OpponentList
       rows={opponentRows}
       onPick={(key) => setSelectedKey(key)}
-      onBack={() => setScreen("home")}
+      onBack={() => setScreen("insights")}
     />
   );
 }

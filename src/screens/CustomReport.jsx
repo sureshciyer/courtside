@@ -84,7 +84,7 @@ export default function CustomReport({ setScreen }) {
   if (allMatches.length === 0) {
     return (
       <Screen>
-        <TopBar title="Custom report" onBack={() => setScreen("home")} />
+        <TopBar title="Custom report" onBack={() => setScreen("insights")} />
         <Card className="text-center py-10">
           <div className="text-4xl mb-2">📋</div>
           <div className="font-bold text-white mb-1">No match data yet</div>
@@ -130,7 +130,7 @@ export default function CustomReport({ setScreen }) {
       <TopBar
         title="Custom report"
         subtitle={`${playerName} · ${scopeLabel} · ${matches.length} match${matches.length !== 1 ? "es" : ""} · ${bundle.agg.rallies} rallies`}
-        onBack={() => setScreen("home")}
+        onBack={() => setScreen("insights")}
         right={<PrintBtn onClick={printReport} />}
       />
 
