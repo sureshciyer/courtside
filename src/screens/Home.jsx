@@ -1,5 +1,6 @@
 import { useMatchStore } from "../store/useMatchStore.js";
 import { Screen, BigBtn, Card } from "../components/ui.jsx";
+import { hasPreMatch } from "../constants/prematch.js";
 
 export default function Home({ setScreen }) {
   const matches = useMatchStore((s) => s.matches);
@@ -11,6 +12,7 @@ export default function Home({ setScreen }) {
   const startPlannedMatch = useMatchStore((s) => s.startPlannedMatch);
   const discardPlannedMatch = useMatchStore((s) => s.discardPlannedMatch);
   const openPlannedEdit = useMatchStore((s) => s.openPlannedEdit);
+  const openPlanView = useMatchStore((s) => s.openPlanView);
   const pauseCurrentMatch = useMatchStore((s) => s.pauseCurrentMatch);
 
   const totalRallies = matches.reduce((a, m) => a + m.rallies.length, 0);
@@ -38,6 +40,11 @@ export default function Home({ setScreen }) {
   const handleEditPlanned = (id) => {
     openPlannedEdit(id);
     setScreen("setup");
+  };
+
+  const handleViewPlan = (id) => {
+    openPlanView(id);
+    setScreen("preMatchPlan");
   };
 
   const handleDiscardPlanned = (m) => {
@@ -153,28 +160,38 @@ export default function Home({ setScreen }) {
                     {m.tournament && (
                       <div className="text-[11px] text-sky-300/80 truncate">{m.tournament}</div>
                     )}
-                    <div className="text-[10px] text-neutral-500 mt-0.5">🎯 Plan ready · not started</div>
+                    <div className="text-[10px] text-neutral-500 mt-0.5">
+                      {hasPreMatch(m) ? "🎯 Plan ready · not started" : "Not started"}
+                    </div>
                   </div>
-                  <div className="flex flex-col gap-1 shrink-0">
+                  <button
+                    onClick={() => handleStartPlanned(m.id)}
+                    className="px-3 py-1.5 rounded-md bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs active:scale-95 shrink-0"
+                  >
+                    Start →
+                  </button>
+                </div>
+                <div className="flex gap-1.5 mt-2 pt-2 border-t border-sky-800/40">
+                  {hasPreMatch(m) && (
                     <button
-                      onClick={() => handleStartPlanned(m.id)}
-                      className="px-3 py-1.5 rounded-md bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs active:scale-95"
+                      onClick={() => handleViewPlan(m.id)}
+                      className="flex-1 px-2 py-1 rounded-md bg-sky-900/40 hover:bg-sky-900/60 border border-sky-800 text-sky-200 text-[11px] font-semibold active:scale-95"
                     >
-                      Start →
+                      📄 View / print plan
                     </button>
-                    <button
-                      onClick={() => handleEditPlanned(m.id)}
-                      className="px-3 py-1 rounded-md bg-neutral-800 hover:bg-neutral-700 text-neutral-300 text-[10px] font-semibold border border-neutral-700"
-                    >
-                      Edit prep
-                    </button>
-                    <button
-                      onClick={() => handleDiscardPlanned(m)}
-                      className="px-3 py-1 rounded-md bg-neutral-900 hover:bg-red-950 text-red-400 text-[10px] font-semibold border border-red-900 hover:border-red-700"
-                    >
-                      Discard
-                    </button>
-                  </div>
+                  )}
+                  <button
+                    onClick={() => handleEditPlanned(m.id)}
+                    className="flex-1 px-2 py-1 rounded-md bg-neutral-800 hover:bg-neutral-700 text-neutral-300 text-[11px] font-semibold border border-neutral-700 active:scale-95"
+                  >
+                    Edit prep
+                  </button>
+                  <button
+                    onClick={() => handleDiscardPlanned(m)}
+                    className="flex-1 px-2 py-1 rounded-md bg-neutral-900 hover:bg-red-950 text-red-400 text-[11px] font-semibold border border-red-900 hover:border-red-700 active:scale-95"
+                  >
+                    Discard
+                  </button>
                 </div>
               </Card>
             ))}

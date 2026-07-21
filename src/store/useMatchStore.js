@@ -261,6 +261,10 @@ export const useMatchStore = create(
       plannedEditId: null,
       openPlannedEdit: (id) => set({ plannedEditId: id }),
 
+      // Which match's pre-match plan the print/share view should render.
+      planViewId: null,
+      openPlanView: (id) => set({ planViewId: id }),
+
       // Create a prepared match and shelve it — does not touch currentMatch.
       savePlannedMatch: (setup) => {
         const counter = (get().matchCounter || 0) + 1;

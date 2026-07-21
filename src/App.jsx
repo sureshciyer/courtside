@@ -15,6 +15,7 @@ import ReflectionTrends from "./screens/ReflectionTrends.jsx";
 import QuickLog from "./screens/QuickLog.jsx";
 import Insights from "./screens/Insights.jsx";
 import EditMatch from "./screens/EditMatch.jsx";
+import PreMatchPlan from "./screens/PreMatchPlan.jsx";
 
 const SCREENS = {
   home: Home,
@@ -32,6 +33,7 @@ const SCREENS = {
   quickLog: QuickLog,
   insights: Insights,
   editMatch: EditMatch,
+  preMatchPlan: PreMatchPlan,
   settings: SettingsScreen,
 };
 
