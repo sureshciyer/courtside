@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import { useMatchStore } from "../store/useMatchStore.js";
 import { Screen, TopBar, Card, SectionLabel, MeterRow, Badge } from "../components/ui.jsx";
-import { REFLECTION_RATINGS, hasReflection, MATCH_TYPES } from "../constants/reflection.js";
+import { REFLECTION_RATINGS, hasReflection, MATCH_TYPES, normalizeMatchType } from "../constants/reflection.js";
 
 // Tiny dependency-free sparkline for 1–5 rating series.
 function Sparkline({ points, width = 132, height = 34 }) {
@@ -51,7 +51,7 @@ export default function ReflectionTrends({ setScreen }) {
 
   const reflected = useMemo(() => {
     let list = matches.filter(hasReflection);
-    if (typeFilter !== "All") list = list.filter((m) => (m.matchType || "Club casual") === typeFilter);
+    if (typeFilter !== "All") list = list.filter((m) => normalizeMatchType(m.matchType) === typeFilter);
     return list; // matches[] is already chronological (append on endMatch)
   }, [matches, typeFilter]);
 
@@ -68,6 +68,11 @@ export default function ReflectionTrends({ setScreen }) {
   }, [reflected]);
 
   const styleCounts = useMemo(() => tally(reflected.flatMap((m) => m.reflection?.styleTags || [])), [reflected]);
+  const feelingCounts = useMemo(() => tally(reflected.flatMap((m) => m.reflection?.feelings || [])), [reflected]);
+  const bigPointCounts = useMemo(
+    () => tally(reflected.map((m) => m.reflection?.bigPointMindset).filter(Boolean)),
+    [reflected]
+  );
   const strengthCounts = useMemo(() => tally(reflected.flatMap((m) => m.reflection?.strengths || [])), [reflected]);
   const weaknessCounts = useMemo(() => tally(reflected.flatMap((m) => m.reflection?.weaknesses || [])), [reflected]);
   const focusList = reflected
@@ -147,6 +152,28 @@ export default function ReflectionTrends({ setScreen }) {
                 <MeterRow key={tag} label={tag} value={n} total={reflected.length} tone="emerald" />
               ))}
               <p className="text-[10px] text-neutral-600 mt-1">Share of reflected matches carrying each tag.</p>
+            </Card>
+          )}
+
+          {feelingCounts.length > 0 && (
+            <Card className="mb-3">
+              <SectionLabel>Feelings mix</SectionLabel>
+              {feelingCounts.map(([tag, n]) => (
+                <MeterRow key={tag} label={tag} value={n} total={reflected.length} tone="sky" />
+              ))}
+              <p className="text-[10px] text-neutral-600 mt-1">Share of reflected matches where each feeling was picked.</p>
+            </Card>
+          )}
+
+          {bigPointCounts.length > 0 && (
+            <Card className="mb-3">
+              <SectionLabel>Big-point mindset</SectionLabel>
+              {bigPointCounts.map(([tag, n]) => (
+                <MeterRow key={tag} label={tag} value={n} total={reflected.length} tone="amber" />
+              ))}
+              <p className="text-[10px] text-neutral-600 mt-1">
+                Filter by Tournament vs Casual above to see if pressure changes the mindset.
+              </p>
             </Card>
           )}
 

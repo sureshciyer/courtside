@@ -865,7 +865,10 @@ const reflectionMarkdown = (match) => {
   const r = match?.reflection;
   if (!r) return "";
   const rated = Object.entries(r.ratings || {}).filter(([, v]) => v != null);
-  const any = rated.length || (r.styleTags || []).length || (r.strengths || []).length || (r.weaknesses || []).length;
+  const errorNotes = Object.entries(r.errorNotes || {}).filter(([, t]) => t?.trim());
+  const any = rated.length || (r.styleTags || []).length || (r.strengths || []).length
+    || (r.weaknesses || []).length || errorNotes.length || r.notes?.trim()
+    || (r.feelings || []).length || r.bigPointMindset || r.selfTalk?.trim();
   if (!any) return "";
 
   const LABELS = {
@@ -879,8 +882,8 @@ const reflectionMarkdown = (match) => {
   };
 
   let md = H2("📝 Player reflection (self-assessment)");
-  if (match.matchType || match.format) {
-    md += P(`**Context:** ${[match.matchType, match.format].filter(Boolean).join(" · ")}`);
+  if (match.matchType || match.format || match.club) {
+    md += P(`**Context:** ${[match.matchType, match.format, match.club].filter(Boolean).join(" · ")}`);
   }
   if (rated.length) {
     md += "| Aspect | Self-rating (1–5) |\n|---|---|\n";
@@ -890,6 +893,15 @@ const reflectionMarkdown = (match) => {
   if ((r.styleTags || []).length) md += P(`**Playing style this match:** ${r.styleTags.join(", ")}`);
   if ((r.strengths || []).length) md += P(`**What worked:** ${r.strengths.join(", ")}`);
   if ((r.weaknesses || []).length) md += P(`**To improve:** ${r.weaknesses.join(", ")}`);
+  if ((r.feelings || []).length) md += P(`**Feelings after the match:** ${r.feelings.join(", ")}`);
+  if (r.bigPointMindset) md += P(`**Mindset at big points:** ${r.bigPointMindset}`);
+  if (r.selfTalk?.trim()) md += P(`**Thoughts in tough moments (own words):** ${r.selfTalk.trim()}`);
+  if (errorNotes.length) {
+    md += P("**Error notes:**");
+    for (const [topic, text] of errorNotes) md += `- **${topic}:** ${text.trim()}\n`;
+    md += "\n";
+  }
+  if (r.notes?.trim()) md += P(`**Other observations:** ${r.notes.trim()}`);
   if (r.focusNext?.trim()) md += P(`**Focus for next match:** ${r.focusNext.trim()}`);
   md += P("_Note for AI critique: compare these self-ratings against the objective rally data above — flag any gaps between perception and reality._");
   return md;

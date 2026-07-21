@@ -8,7 +8,7 @@ import {
 } from "../lib/rally.js";
 
 const STORE_KEY = "courtside-v1";
-const SCHEMA_VERSION = 3;
+const SCHEMA_VERSION = 4;
 
 // Opponent profile keys are normalized — lower-cased, trimmed — so "Rahul S."
 // and "rahul s." map to the same dossier. Matches keep the original display
@@ -126,7 +126,8 @@ export const useMatchStore = create(
           date: meta.date || new Date().toISOString().split("T")[0],
           opponent: meta.opponent || "Club session",
           tournament: meta.tournament || "",
-          matchType: meta.matchType || "Club casual",
+          matchType: meta.matchType || "Casual Game",
+          club: meta.club || "",
           format: meta.format || "Singles",
           sets,
           currentSet: sets.length - 1,
@@ -682,6 +683,21 @@ export const useMatchStore = create(
             };
           }
           persisted = { ...persisted, schemaVersion: 3, opponents };
+        }
+        if ((persisted.schemaVersion ?? version) < 4) {
+          // v3 -> v4: match types simplified to Casual Game / Tournament.
+          // Old "Club casual" and "Club league" both collapse into Casual Game.
+          const remapType = (m) =>
+            m && m.matchType && m.matchType !== "Tournament"
+              ? { ...m, matchType: "Casual Game" }
+              : m;
+          persisted = {
+            ...persisted,
+            schemaVersion: 4,
+            matches: (persisted.matches || []).map(remapType),
+            pausedMatches: (persisted.pausedMatches || []).map(remapType),
+            currentMatch: remapType(persisted.currentMatch) || null,
+          };
         }
         return persisted;
       },

@@ -111,9 +111,9 @@ export default function History({ setScreen }) {
                 <div className="text-[11px] text-neutral-500 italic">Quick log — no rally data</div>
               )}
               {m.tournament && <div className="text-[11px] text-neutral-500 mt-1">{m.tournament}</div>}
-              {(m.matchType || m.format) && (
+              {(m.matchType || m.format || m.club) && (
                 <div className="text-[11px] text-neutral-500 mt-0.5">
-                  {[m.matchType, m.format].filter(Boolean).join(" · ")}
+                  {[m.matchType, m.format, m.club].filter(Boolean).join(" · ")}
                 </div>
               )}
               {m.playerStyle && m.playerStyle !== "Unknown" && (

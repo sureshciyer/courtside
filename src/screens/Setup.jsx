@@ -14,7 +14,8 @@ export default function Setup({ setScreen }) {
     opponent: "",
     tournament: "",
     playerStyle: "Unknown",
-    matchType: "Club casual",
+    matchType: "Casual Game",
+    club: "",
     format: "Singles",
   });
 
@@ -37,6 +38,12 @@ export default function Setup({ setScreen }) {
           value={form.matchType}
           onChange={(v) => setForm({ ...form, matchType: v })}
           options={MATCH_TYPES}
+        />
+        <Field
+          label="Club / venue (optional)"
+          value={form.club}
+          onChange={(v) => setForm({ ...form, club: v })}
+          placeholder="e.g. home club, or a nearby club for sparring"
         />
         <Select
           label="Format"

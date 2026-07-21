@@ -67,7 +67,8 @@ export default function QuickLog({ setScreen }) {
   const [form, setForm] = useState({
     date: new Date().toISOString().split("T")[0],
     opponent: "",
-    matchType: "Club casual",
+    matchType: "Casual Game",
+    club: "",
     format: "Singles",
     result: null, // "won" | "lost" | null
   });
@@ -86,6 +87,7 @@ export default function QuickLog({ setScreen }) {
       date: form.date,
       opponent: form.opponent.trim(),
       matchType: form.matchType,
+      club: form.club.trim(),
       format: form.format,
       sets: hasScores ? enteredSets : undefined,
       // Explicit W/L only matters when no scores were entered.
@@ -115,6 +117,12 @@ export default function QuickLog({ setScreen }) {
           <div className="text-[11px] uppercase tracking-wider text-neutral-500 mb-1.5 font-semibold">Match type</div>
           <ToggleRow options={MATCH_TYPES} value={form.matchType} onChange={(v) => setForm({ ...form, matchType: v })} />
         </div>
+        <Field
+          label="Club / venue (optional)"
+          value={form.club}
+          onChange={(v) => setForm({ ...form, club: v })}
+          placeholder="e.g. home club, or a nearby club for sparring"
+        />
         <div>
           <div className="text-[11px] uppercase tracking-wider text-neutral-500 mb-1.5 font-semibold">Format</div>
           <ToggleRow options={MATCH_FORMATS} value={form.format} onChange={(v) => setForm({ ...form, format: v })} />
