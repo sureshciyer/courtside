@@ -16,6 +16,7 @@ import QuickLog from "./screens/QuickLog.jsx";
 import Insights from "./screens/Insights.jsx";
 import EditMatch from "./screens/EditMatch.jsx";
 import PreMatchPlan from "./screens/PreMatchPlan.jsx";
+import OpponentReflections from "./screens/OpponentReflections.jsx";
 
 const SCREENS = {
   home: Home,
@@ -34,6 +35,7 @@ const SCREENS = {
   insights: Insights,
   editMatch: EditMatch,
   preMatchPlan: PreMatchPlan,
+  opponentReflections: OpponentReflections,
   settings: SettingsScreen,
 };
 

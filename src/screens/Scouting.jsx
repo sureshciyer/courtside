@@ -14,6 +14,8 @@ import {
 import {
   Screen, TopBar, Card, BigBtn, Stat, HeatGrid, SectionLabel, Badge, AutoSavingTextarea,
 } from "../components/ui.jsx";
+import { hasReflection } from "../constants/reflection.js";
+import { hasPreMatch } from "../constants/prematch.js";
 
 // Scouting screen. Two views:
 //   - Opponent list (default) — searchable, shows career record per opponent
@@ -37,7 +39,7 @@ export default function Scouting({ setScreen }) {
   if (selectedKey) {
     const row = opponentRows.find((o) => o.key === selectedKey);
     const name = row?.name || selectedKey;
-    return <Dossier name={name} onBack={() => setSelectedKey(null)} goHome={() => setScreen("home")} />;
+    return <Dossier name={name} onBack={() => setSelectedKey(null)} goHome={() => setScreen("home")} setScreen={setScreen} />;
   }
 
   return (
@@ -155,12 +157,13 @@ function OpponentList({ rows, onPick, onBack }) {
 // ===================================================================
 //                           Dossier view
 // ===================================================================
-function Dossier({ name, onBack, goHome }) {
+function Dossier({ name, onBack, goHome, setScreen }) {
   const matches = useMatchStore((s) => s.matches);
   const opponents = useMatchStore((s) => s.opponents);
   const playerName = useMatchStore((s) => s.settings?.playerName) || "Player";
   const updateOpponentProfile = useMatchStore((s) => s.updateOpponentProfile);
   const deleteOpponentProfile = useMatchStore((s) => s.deleteOpponentProfile);
+  const openOpponentTimeline = useMatchStore((s) => s.openOpponentTimeline);
 
   const dossier = useMemo(
     () => opponentDossier(matches, name, opponents || {}),
@@ -205,6 +208,7 @@ function Dossier({ name, onBack, goHome }) {
   };
 
   const b = dossier.bundle;
+  const reflectedCount = dossier.matches.filter((m) => hasReflection(m) || hasPreMatch(m)).length;
 
   return (
     <Screen wide>
@@ -230,6 +234,23 @@ function Dossier({ name, onBack, goHome }) {
           </div>
         )}
       </Card>
+
+      {/* Reflections timeline */}
+      {reflectedCount > 0 && (
+        <Card className="mb-3">
+          <SectionLabel>📖 Reflections timeline</SectionLabel>
+          <p className="text-xs text-neutral-400 mb-2 leading-relaxed">
+            Every pre- and post-match reflection vs {name}, stacked by date on one page —
+            read the arc across meetings, or print / save as PDF for the coach.
+          </p>
+          <BigBtn
+            tone="info"
+            onClick={() => { openOpponentTimeline(name); setScreen("opponentReflections"); }}
+          >
+            📖 Read all reflections ({reflectedCount})
+          </BigBtn>
+        </Card>
+      )}
 
       {/* Battle plan export */}
       <Card tone="accent" className="mb-3">

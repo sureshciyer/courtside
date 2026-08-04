@@ -265,6 +265,10 @@ export const useMatchStore = create(
       planViewId: null,
       openPlanView: (id) => set({ planViewId: id }),
 
+      // Which opponent (display name) the reflections-timeline view should show.
+      opponentTimelineName: null,
+      openOpponentTimeline: (name) => set({ opponentTimelineName: name }),
+
       // Create a prepared match and shelve it — does not touch currentMatch.
       savePlannedMatch: (setup) => {
         const counter = (get().matchCounter || 0) + 1;
