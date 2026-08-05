@@ -212,6 +212,8 @@ export const useMatchStore = create(
       // Transient UI targets (not persisted).
       trainingEditId: null,
       openTrainingEdit: (id) => set({ trainingEditId: id }),
+      trainingViewId: null,
+      openTrainingView: (id) => set({ trainingViewId: id }),
       drillViewName: null,
       openDrillView: (name) => set({ drillViewName: name }),
 

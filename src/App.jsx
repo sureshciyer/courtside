@@ -19,6 +19,7 @@ import PreMatchPlan from "./screens/PreMatchPlan.jsx";
 import OpponentReflections from "./screens/OpponentReflections.jsx";
 import Training from "./screens/Training.jsx";
 import TrainingSessionEdit from "./screens/TrainingSessionEdit.jsx";
+import TrainingSessionView from "./screens/TrainingSessionView.jsx";
 import DrillCatalog from "./screens/DrillCatalog.jsx";
 import DrillDossier from "./screens/DrillDossier.jsx";
 
@@ -42,6 +43,7 @@ const SCREENS = {
   opponentReflections: OpponentReflections,
   training: Training,
   trainingSessionEdit: TrainingSessionEdit,
+  trainingSessionView: TrainingSessionView,
   drillCatalog: DrillCatalog,
   drillDossier: DrillDossier,
   settings: SettingsScreen,

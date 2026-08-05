@@ -10,6 +10,7 @@ import { trainingSummary } from "../lib/training.js";
 export default function Training({ setScreen }) {
   const sessions = useMatchStore((s) => s.trainingSessions);
   const openTrainingEdit = useMatchStore((s) => s.openTrainingEdit);
+  const openTrainingView = useMatchStore((s) => s.openTrainingView);
 
   const [q, setQ] = useState("");
   const [typeFilter, setTypeFilter] = useState("All");
@@ -34,7 +35,10 @@ export default function Training({ setScreen }) {
   }, [sessions, q, typeFilter]);
 
   const newSession = () => { openTrainingEdit(null); setScreen("trainingSessionEdit"); };
-  const openSession = (id) => { openTrainingEdit(id); setScreen("trainingSessionEdit"); };
+  // Tapping a session opens the read/print view; edit is one tap deeper
+  // (or via the ✎ shortcut on the row).
+  const openSession = (id) => { openTrainingView(id); setScreen("trainingSessionView"); };
+  const editSession = (id) => { openTrainingEdit(id); setScreen("trainingSessionEdit"); };
 
   return (
     <Screen>
@@ -89,8 +93,8 @@ export default function Training({ setScreen }) {
       ) : (
         <div className="flex flex-col gap-2">
           {rows.map((s) => (
-            <button key={s.id} onClick={() => openSession(s.id)} className="text-left">
-              <Card tone={s.type === "Private" ? "accent" : "default"}>
+            <Card key={s.id} tone={s.type === "Private" ? "accent" : "default"} className="!p-0 overflow-hidden">
+              <button onClick={() => openSession(s.id)} className="w-full text-left p-4 hover:bg-neutral-800/40 transition active:scale-[0.99]">
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-2 flex-wrap">
@@ -111,8 +115,22 @@ export default function Training({ setScreen }) {
                   </div>
                   <span className="text-neutral-500 text-lg">›</span>
                 </div>
-              </Card>
-            </button>
+              </button>
+              <div className="flex gap-1.5 px-4 pb-3 -mt-1">
+                <button
+                  onClick={() => openSession(s.id)}
+                  className="flex-1 px-2 py-1 rounded-md bg-sky-900/40 hover:bg-sky-900/60 border border-sky-800 text-sky-200 text-[11px] font-semibold active:scale-95"
+                >
+                  📄 View / print
+                </button>
+                <button
+                  onClick={() => editSession(s.id)}
+                  className="flex-1 px-2 py-1 rounded-md bg-neutral-800 hover:bg-neutral-700 border border-neutral-700 text-neutral-300 text-[11px] font-semibold active:scale-95"
+                >
+                  ✎ Edit
+                </button>
+              </div>
+            </Card>
           ))}
         </div>
       )}
