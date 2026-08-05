@@ -4,6 +4,7 @@ import { Screen, TopBar, BigBtn, Card, SectionLabel } from "../components/ui.jsx
 import { makeBackup, parseBackup, mergeBackup, BACKUP_VERSION } from "../lib/backup.js";
 import { debugLog, relativeTime } from "../lib/debugLog.js";
 import { syncWithDrive, hasValidToken } from "../lib/driveSync.js";
+import { resolveGoogleClientId } from "../lib/config.js";
 
 // Backup / Restore hub. Three sections:
 //   1. Backup       — full JSON envelope download (safe restore target)
@@ -27,7 +28,8 @@ export default function Export({ setScreen }) {
   const replaceAll = useMatchStore((s) => s.replaceAll);
   const recordBackupDownload = useMatchStore((s) => s.recordBackupDownload);
   const recordCloudSync = useMatchStore((s) => s.recordCloudSync);
-  const googleClientId = settings?.googleClientId || "";
+  // Deployment default (VITE_GOOGLE_CLIENT_ID) unless overridden in Settings.
+  const googleClientId = resolveGoogleClientId(settings);
 
   const totalRallies = matches.reduce((a, m) => a + m.rallies.length, 0);
   const opponentCount = Object.keys(opponents).length;

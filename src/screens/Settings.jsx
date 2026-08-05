@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useMatchStore } from "../store/useMatchStore.js";
 import { Screen, TopBar, Card, Field, SectionLabel } from "../components/ui.jsx";
 import { debugLog, relativeTime } from "../lib/debugLog.js";
+import { resolveGoogleClientId, ENV_GOOGLE_CLIENT_ID } from "../lib/config.js";
 
 // Simple preferences screen. Every change writes back to the Zustand store
 // immediately (no "Save" button) — the `persist` middleware handles storage.
@@ -48,25 +49,7 @@ export default function Settings({ setScreen }) {
         </p>
       </Card>
 
-      <Card className="mb-3">
-        <SectionLabel>☁️ Cloud sync (Google Drive)</SectionLabel>
-        <Field
-          label="Google OAuth Client ID"
-          value={settings.googleClientId || ""}
-          onChange={(v) => updateSettings({ googleClientId: v.trim() })}
-          placeholder="1234567890-xxxx.apps.googleusercontent.com"
-        />
-        <p className="text-[11px] text-neutral-500 leading-relaxed -mt-1">
-          One-time setup: create a free OAuth Client ID at{" "}
-          <span className="text-emerald-400 font-mono">console.cloud.google.com</span>{" "}
-          (APIs &amp; Services → Credentials → OAuth client ID → Web application),
-          add this site's URL under "Authorized JavaScript origins", enable the
-          Google Drive API, and paste the Client ID here. Then use "Sync now" on
-          the Backup / Restore screen. Data is stored in a hidden app-private
-          folder in your own Google Drive — this app never sees the rest of your
-          Drive.
-        </p>
-      </Card>
+      <GoogleClientIdCard settings={settings} updateSettings={updateSettings} />
 
       <DebugPanel />
 
@@ -77,6 +60,68 @@ export default function Settings({ setScreen }) {
         Use Export / Download JSON from the home screen to create a backup.
       </Card>
     </Screen>
+  );
+}
+
+// Cloud-sync credentials. The Client ID normally comes from the build
+// (VITE_GOOGLE_CLIENT_ID set in Vercel), so a fresh device / cleared
+// storage needs no setup. The field here is an optional per-device
+// override for local dev or a self-hosted fork.
+function GoogleClientIdCard({ settings, updateSettings }) {
+  const override = settings.googleClientId || "";
+  const effective = resolveGoogleClientId(settings);
+  const usingEnv = !override.trim() && !!ENV_GOOGLE_CLIENT_ID;
+
+  return (
+    <Card className="mb-3" tone={effective ? "accent" : "default"}>
+      <SectionLabel>☁️ Cloud sync (Google Drive)</SectionLabel>
+
+      {usingEnv && (
+        <div className="mb-3 p-2 rounded-md bg-emerald-950/40 border border-emerald-800 text-[11px] text-emerald-200 leading-relaxed">
+          ✓ Configured by this deployment — no setup needed on any device.
+          <div className="font-mono text-[10px] text-emerald-300/70 mt-1 break-all">
+            {ENV_GOOGLE_CLIENT_ID}
+          </div>
+        </div>
+      )}
+
+      <Field
+        label={usingEnv ? "Override Client ID (optional)" : "Google OAuth Client ID"}
+        value={override}
+        onChange={(v) => updateSettings({ googleClientId: v.trim() })}
+        placeholder={usingEnv ? "Leave blank to use the deployment default" : "1234567890-xxxx.apps.googleusercontent.com"}
+      />
+      {override.trim() && ENV_GOOGLE_CLIENT_ID && (
+        <button
+          onClick={() => updateSettings({ googleClientId: "" })}
+          className="mb-3 -mt-1 px-2.5 py-1 rounded-md bg-neutral-800 hover:bg-neutral-700 border border-neutral-700 text-neutral-300 text-[11px] font-semibold"
+        >
+          Clear override — use deployment default
+        </button>
+      )}
+
+      <p className="text-[11px] text-neutral-500 leading-relaxed -mt-1">
+        {usingEnv ? (
+          <>
+            Only set an override if you want this device to sync through a
+            different Google project.
+          </>
+        ) : (
+          <>
+            Set <span className="text-emerald-400 font-mono">VITE_GOOGLE_CLIENT_ID</span> in
+            your hosting environment (Vercel → Settings → Environment Variables)
+            so every device is configured automatically — or paste an ID here for
+            this device only. Create a free OAuth Client ID at{" "}
+            <span className="text-emerald-400 font-mono">console.cloud.google.com</span>{" "}
+            (APIs &amp; Services → Credentials → OAuth client ID → Web application),
+            add this site's URL under "Authorized JavaScript origins", and enable
+            the Google Drive API.
+          </>
+        )}{" "}
+        Data is stored in a hidden app-private folder in your own Google Drive —
+        this app never sees the rest of your Drive.
+      </p>
+    </Card>
   );
 }
 
