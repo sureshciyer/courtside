@@ -7,6 +7,8 @@ import {
   computePhase,
 } from "../lib/rally.js";
 import { migratePersisted } from "../lib/migrations.js";
+import { normalizeDrill } from "../lib/training.js";
+import { emptyDrill } from "../constants/training.js";
 
 const STORE_KEY = "courtside-v1";
 const SCHEMA_VERSION = 4;
@@ -60,6 +62,10 @@ const scoreString = (set) => `${set.sonScore}-${set.oppScore}`;
 // with a previously-completed match that's already been archived.
 const makeMatchId = (counter) => `M${String(counter).padStart(3, "0")}`;
 
+// Training sessions get their own T-prefixed id space + counter so they
+// never collide with match ids.
+const makeTrainingId = (counter) => `T${String(counter).padStart(3, "0")}`;
+
 // Package a live match for the paused shelf: bundle the separate currentRally
 // back into the match object so it can travel as a single unit.
 const packMatch = (match, rally) =>
@@ -81,6 +87,11 @@ export const useMatchStore = create(
       pausedMatches: [],     // in-progress matches stashed for later
       plannedMatches: [],    // prepared-but-not-started matches (pre-match prep done ahead of time)
       matchCounter: 0,       // monotonic — last id issued
+
+      // ---------- Mode 4: training log ----------
+      trainingSessions: [],  // logged coaching sessions (private + group)
+      drillCatalog: {},      // canonical drills, keyed by normalized name
+      trainingCounter: 0,    // monotonic — last training id issued
 
       // Opponent profiles, keyed by normalized opponent name. Profile shape:
       //   { name, notes, aiInsights, createdAt, updatedAt }
@@ -196,6 +207,80 @@ export const useMatchStore = create(
       removeGoal: (id) =>
         set((state) => ({ goals: state.goals.filter((g) => g.id !== id) })),
       clearGoals: () => set({ goals: [] }),
+
+      // ---------- training log ----------
+      // Transient UI targets (not persisted).
+      trainingEditId: null,
+      openTrainingEdit: (id) => set({ trainingEditId: id }),
+      drillViewName: null,
+      openDrillView: (name) => set({ drillViewName: name }),
+
+      newTrainingId: () => makeTrainingId((get().trainingCounter || 0) + 1),
+
+      // Idempotently register a drill in the catalog the first time its name
+      // is used; optionally patch its category / skills / notes.
+      ensureDrill: (name, patch = null) => {
+        const key = normalizeDrill(name);
+        if (!key) return;
+        set((state) => {
+          const existing = state.drillCatalog[key];
+          if (existing && !patch) return {};
+          const base = existing || { ...emptyDrill(name), createdAt: Date.now() };
+          return {
+            drillCatalog: {
+              ...state.drillCatalog,
+              [key]: { ...base, ...(patch || {}), name: base.name || name.trim(), updatedAt: Date.now() },
+            },
+          };
+        });
+      },
+
+      updateDrill: (name, patch) => get().ensureDrill(name, patch),
+
+      // Remove a drill from the catalog. Does NOT touch sessions that
+      // referenced it (their per-session entries stay as historical record).
+      deleteDrill: (name) => {
+        const key = normalizeDrill(name);
+        set((state) => {
+          const next = { ...state.drillCatalog };
+          delete next[key];
+          return { drillCatalog: next };
+        });
+      },
+
+      // Create a training session. `session.drills` entries are normalized
+      // and every referenced drill is auto-registered in the catalog.
+      addTrainingSession: (session) => {
+        const counter = (get().trainingCounter || 0) + 1;
+        const id = makeTrainingId(counter);
+        const drills = (session.drills || [])
+          .filter((d) => d.name?.trim())
+          .map((d) => ({ ...d, name: d.name.trim(), drillKey: normalizeDrill(d.name) }));
+        const record = { ...session, id, drills, createdAt: Date.now(), updatedAt: Date.now() };
+        set((state) => ({
+          trainingCounter: counter,
+          trainingSessions: [...state.trainingSessions, record],
+        }));
+        for (const d of drills) get().ensureDrill(d.name);
+        return id;
+      },
+
+      updateTrainingSession: (id, patch) => {
+        const drills = patch.drills
+          ? patch.drills.filter((d) => d.name?.trim()).map((d) => ({ ...d, name: d.name.trim(), drillKey: normalizeDrill(d.name) }))
+          : null;
+        set((state) => ({
+          trainingSessions: state.trainingSessions.map((s) =>
+            s.id === id ? { ...s, ...patch, ...(drills ? { drills } : {}), updatedAt: Date.now() } : s
+          ),
+        }));
+        if (drills) for (const d of drills) get().ensureDrill(d.name);
+      },
+
+      deleteTrainingSession: (id) =>
+        set((state) => ({
+          trainingSessions: state.trainingSessions.filter((s) => s.id !== id),
+        })),
 
       // ---------- opponent profiles ----------
 
@@ -679,6 +764,9 @@ export const useMatchStore = create(
           plannedMatches: data?.plannedMatches ?? [],
           matchCounter: data?.matchCounter ?? (data?.matches?.length || 0),
           opponents: data?.opponents ?? {},
+          trainingSessions: data?.trainingSessions ?? [],
+          drillCatalog: data?.drillCatalog ?? {},
+          trainingCounter: data?.trainingCounter ?? (data?.trainingSessions?.length || 0),
         }),
 
       // Merge a backup envelope into current state without destroying local
@@ -739,6 +827,9 @@ export const useMatchStore = create(
         plannedMatches: state.plannedMatches,
         matchCounter: state.matchCounter,
         opponents: state.opponents,
+        trainingSessions: state.trainingSessions,
+        drillCatalog: state.drillCatalog,
+        trainingCounter: state.trainingCounter,
         settings: state.settings,
         syncStatus: state.syncStatus,
         goals: state.goals,
@@ -752,6 +843,9 @@ export const useMatchStore = create(
         settings: { ...current.settings, ...(persisted?.settings || {}) },
         pausedMatches: persisted?.pausedMatches || current.pausedMatches || [],
         plannedMatches: persisted?.plannedMatches || current.plannedMatches || [],
+        trainingSessions: persisted?.trainingSessions || current.trainingSessions || [],
+        drillCatalog: { ...(current.drillCatalog || {}), ...(persisted?.drillCatalog || {}) },
+        trainingCounter: persisted?.trainingCounter ?? current.trainingCounter ?? 0,
         opponents: { ...(current.opponents || {}), ...(persisted?.opponents || {}) },
         syncStatus: { ...(current.syncStatus || {}), ...(persisted?.syncStatus || {}) },
         goals: persisted?.goals || current.goals || [],

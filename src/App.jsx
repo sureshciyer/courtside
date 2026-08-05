@@ -17,6 +17,10 @@ import Insights from "./screens/Insights.jsx";
 import EditMatch from "./screens/EditMatch.jsx";
 import PreMatchPlan from "./screens/PreMatchPlan.jsx";
 import OpponentReflections from "./screens/OpponentReflections.jsx";
+import Training from "./screens/Training.jsx";
+import TrainingSessionEdit from "./screens/TrainingSessionEdit.jsx";
+import DrillCatalog from "./screens/DrillCatalog.jsx";
+import DrillDossier from "./screens/DrillDossier.jsx";
 
 const SCREENS = {
   home: Home,
@@ -36,6 +40,10 @@ const SCREENS = {
   editMatch: EditMatch,
   preMatchPlan: PreMatchPlan,
   opponentReflections: OpponentReflections,
+  training: Training,
+  trainingSessionEdit: TrainingSessionEdit,
+  drillCatalog: DrillCatalog,
+  drillDossier: DrillDossier,
   settings: SettingsScreen,
 };
 

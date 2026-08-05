@@ -199,6 +199,9 @@ export default function Home({ setScreen }) {
         </div>
       )}
 
+      <BigBtn tone="secondary" onClick={() => setScreen("training")}>
+        🏋️ Training log
+      </BigBtn>
       <BigBtn tone="secondary" onClick={() => setScreen("quickLog")}>
         📝 Quick log (reflection only)
       </BigBtn>

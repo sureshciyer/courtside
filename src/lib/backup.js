@@ -9,7 +9,7 @@
 // so existing local notes / AI insights are never overwritten by an import.
 
 export const BACKUP_SIGNATURE = "courtside";
-export const BACKUP_VERSION = 4;
+export const BACKUP_VERSION = 5;
 
 // Build the envelope from a store-state snapshot.
 export const makeBackup = (state) => ({
@@ -28,6 +28,10 @@ export const makeBackup = (state) => ({
   currentRally: state.currentRally || null,
   matchCounter: state.matchCounter || 0,
   opponents: state.opponents || {},
+  // Training log — sessions + the canonical drill catalog.
+  trainingSessions: state.trainingSessions || [],
+  drillCatalog: state.drillCatalog || {},
+  trainingCounter: state.trainingCounter || 0,
   // Settings are included so a fresh-device restore also brings back the
   // player name and handedness, but merge logic does NOT overwrite local
   // settings automatically — see mergeBackup below.
@@ -79,6 +83,10 @@ export const mergeBackup = (current, incoming) => {
   const incomingPlanned = Array.isArray(incoming?.plannedMatches) ? incoming.plannedMatches : [];
   const currentOpponents = current.opponents || {};
   const incomingOpponents = incoming?.opponents || {};
+  const currentTraining = current.trainingSessions || [];
+  const incomingTraining = Array.isArray(incoming?.trainingSessions) ? incoming.trainingSessions : [];
+  const currentDrills = current.drillCatalog || {};
+  const incomingDrills = incoming?.drillCatalog || {};
 
   // --- matches: union by id, existing wins on collision ---
   const matchIds = new Set(currentMatches.map((m) => m.id));
@@ -111,6 +119,30 @@ export const mergeBackup = (current, incoming) => {
     plannedIds.add(m.id);
   }
   const mergedPlanned = [...currentPlanned, ...addedPlanned];
+
+  // --- training sessions: union by id ---
+  const trainingIds = new Set(currentTraining.map((s) => s.id));
+  const addedTraining = [];
+  for (const s of incomingTraining) {
+    if (!s?.id || trainingIds.has(s.id)) continue;
+    addedTraining.push(s);
+    trainingIds.add(s.id);
+  }
+  const mergedTraining = [...currentTraining, ...addedTraining];
+
+  // --- drill catalog: add missing drills; fill empty fields on existing ---
+  const mergedDrills = { ...currentDrills };
+  let addedDrills = 0;
+  for (const [key, drill] of Object.entries(incomingDrills)) {
+    if (!drill) continue;
+    const existing = mergedDrills[key];
+    if (!existing) { mergedDrills[key] = drill; addedDrills++; continue; }
+    const patched = { ...existing };
+    if (!existing.notes?.trim() && drill.notes?.trim()) patched.notes = drill.notes;
+    if ((!existing.skills || existing.skills.length === 0) && (drill.skills || []).length) patched.skills = drill.skills;
+    if ((!existing.category || existing.category === "Other") && drill.category) patched.category = drill.category;
+    mergedDrills[key] = patched;
+  }
 
   // --- opponents: profile-wise field merge ---
   // For each incoming profile:
@@ -186,6 +218,13 @@ export const mergeBackup = (current, incoming) => {
     mergedMatches.length
   );
 
+  // --- training counter: take max, bumped above merged length ---
+  const mergedTrainingCounter = Math.max(
+    current.trainingCounter || 0,
+    incoming?.trainingCounter || 0,
+    mergedTraining.length
+  );
+
   // Build the patch. currentMatch / currentRally are only included when
   // the merge actually produces a value, so a no-op merge (no incoming
   // live match) doesn't accidentally overwrite local live state with null.
@@ -195,6 +234,9 @@ export const mergeBackup = (current, incoming) => {
     plannedMatches: mergedPlanned,
     opponents: mergedOpponents,
     matchCounter: mergedCounter,
+    trainingSessions: mergedTraining,
+    drillCatalog: mergedDrills,
+    trainingCounter: mergedTrainingCounter,
   };
   if (liveOutcome === "restored") {
     patch.currentMatch = mergedCurrentMatch;
@@ -208,6 +250,8 @@ export const mergeBackup = (current, incoming) => {
       skippedMatches: skippedMatches.length,
       addedPaused: addedPaused.length,
       addedPlanned: addedPlanned.length,
+      addedTraining: addedTraining.length,
+      addedDrills,
       addedOpponentProfiles: addedProfiles,
       filledOpponentFields: filledFields,
       totalIncomingMatches: incomingMatches.length,

@@ -79,6 +79,58 @@ describe("planned (prepared) matches in backup", () => {
   });
 });
 
+describe("training log in backup", () => {
+  const sess = (id, drills = []) => ({ id, date: "2026-05-01", type: "Private", drills });
+
+  it("makeBackup carries training sessions, drill catalog, and counter", () => {
+    const out = makeBackup({
+      matches: [], pausedMatches: [], opponents: {}, matchCounter: 0,
+      trainingSessions: [sess("T001")],
+      drillCatalog: { "net drill": { name: "Net drill", category: "Net", skills: ["Net"], notes: "" } },
+      trainingCounter: 1,
+    });
+    expect(out.trainingSessions).toHaveLength(1);
+    expect(out.drillCatalog["net drill"].name).toBe("Net drill");
+    expect(out.trainingCounter).toBe(1);
+  });
+
+  it("mergeBackup unions sessions by id and adds new drills, reporting stats", () => {
+    const local = {
+      matches: [], pausedMatches: [], opponents: {}, matchCounter: 0,
+      trainingSessions: [sess("T001")],
+      drillCatalog: { "net drill": { name: "Net drill", category: "Net", skills: [], notes: "" } },
+      trainingCounter: 1,
+    };
+    const incoming = {
+      matches: [], pausedMatches: [], opponents: {},
+      trainingSessions: [sess("T001"), sess("T002")],
+      drillCatalog: {
+        "net drill": { name: "Net drill", category: "Net", skills: ["Net", "Block"], notes: "tight" },
+        "footwork": { name: "Footwork", category: "Footwork", skills: ["Footwork"], notes: "" },
+      },
+      trainingCounter: 2,
+    };
+    const { patch, stats } = mergeBackup(local, incoming);
+    expect(stats.addedTraining).toBe(1);
+    expect(patch.trainingSessions.map((s) => s.id)).toEqual(["T001", "T002"]);
+    expect(stats.addedDrills).toBe(1); // only "footwork" is new
+    // existing "net drill" gets empty fields filled from incoming
+    expect(patch.drillCatalog["net drill"].skills).toEqual(["Net", "Block"]);
+    expect(patch.drillCatalog["net drill"].notes).toBe("tight");
+    expect(patch.trainingCounter).toBe(2);
+  });
+
+  it("does not drop local training sessions absent from the backup", () => {
+    const local = {
+      matches: [], pausedMatches: [], opponents: {}, matchCounter: 0,
+      trainingSessions: [sess("T009")], drillCatalog: {}, trainingCounter: 9,
+    };
+    const incoming = { matches: [], pausedMatches: [], opponents: {}, trainingSessions: [], drillCatalog: {} };
+    const { patch } = mergeBackup(local, incoming);
+    expect(patch.trainingSessions.map((s) => s.id)).toEqual(["T009"]);
+  });
+});
+
 // mergeBackup: live-match handling. Three outcomes — restored / parked / skipped.
 
 describe("mergeBackup live-match handling", () => {

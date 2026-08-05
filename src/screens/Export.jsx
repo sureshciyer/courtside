@@ -14,6 +14,9 @@ export default function Export({ setScreen }) {
   const matches = useMatchStore((s) => s.matches);
   const pausedMatches = useMatchStore((s) => s.pausedMatches) || [];
   const plannedMatches = useMatchStore((s) => s.plannedMatches) || [];
+  const trainingSessions = useMatchStore((s) => s.trainingSessions) || [];
+  const drillCatalog = useMatchStore((s) => s.drillCatalog) || {};
+  const trainingCounter = useMatchStore((s) => s.trainingCounter) || 0;
   const opponents = useMatchStore((s) => s.opponents) || {};
   const matchCounter = useMatchStore((s) => s.matchCounter) || 0;
   const settings = useMatchStore((s) => s.settings);
@@ -37,6 +40,7 @@ export default function Export({ setScreen }) {
     makeBackup({
       matches, pausedMatches, plannedMatches, opponents, matchCounter, settings,
       currentMatch, currentRally,
+      trainingSessions, drillCatalog, trainingCounter,
     });
   const backupJson = () => JSON.stringify(buildBackup(), null, 2);
 
@@ -73,6 +77,9 @@ export default function Export({ setScreen }) {
             matchCounter: st.matchCounter,
             currentMatch: st.currentMatch,
             currentRally: st.currentRally,
+            trainingSessions: st.trainingSessions,
+            drillCatalog: st.drillCatalog,
+            trainingCounter: st.trainingCounter,
           };
           const { patch, stats } = mergeBackup(current, remoteData);
           applyBackupMerge(patch, stats);
@@ -125,7 +132,7 @@ export default function Export({ setScreen }) {
         reset();
         return;
       }
-      const current = { matches, pausedMatches, plannedMatches, opponents, matchCounter };
+      const current = { matches, pausedMatches, plannedMatches, opponents, matchCounter, trainingSessions, drillCatalog, trainingCounter };
       const { stats } = mergeBackup(current, data);
       setImportState({ phase: "preview", preview: stats, incoming: data, error: null, warning });
       reset();
@@ -138,7 +145,7 @@ export default function Export({ setScreen }) {
 
   const confirmImport = () => {
     if (!importState.incoming) return;
-    const current = { matches, pausedMatches, plannedMatches, opponents, matchCounter };
+    const current = { matches, pausedMatches, plannedMatches, opponents, matchCounter, trainingSessions, drillCatalog, trainingCounter };
     const { patch, stats } = mergeBackup(current, importState.incoming);
     applyBackupMerge(patch, stats);
     setImportState({ phase: "done", preview: stats, incoming: null, error: null, warning: null });
